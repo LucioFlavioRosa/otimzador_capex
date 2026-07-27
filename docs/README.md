@@ -1,6 +1,6 @@
 # Documentação — Otimizador de CAPEX em produção
 
-Cinco documentos, um por assunto. Cada um é autocontido; a ordem abaixo é a de leitura para
+Sete documentos, um por assunto. Cada um é autocontido; a ordem abaixo é a de leitura para
 quem chega agora.
 
 | # | Documento | Para quem | Responde |
@@ -56,5 +56,5 @@ Pipeline inteiro contra o Postgres, incluindo a republicação do mesmo `run_id`
 3. **Reprocessar o mesmo `run_id` é seguro**: apaga e regrava, numa transação só.
 4. **Chave desconhecida em `params` é erro**; chave ausente usa o default do motor, nunca um
    default do job.
-5. `pytest tests/` → **55 passed, 13 skipped**. Os 13 skips são esperados (12 precisam de
+5. `pytest tests/` → **61 passed, 13 skipped**. Os 13 skips são esperados (12 precisam de
    Postgres, 1 precisa da suíte legada).

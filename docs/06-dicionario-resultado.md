@@ -173,7 +173,8 @@ fatura).
 |---|---|---|
 | `cidade`, `horizonte_anos`, `ano_fim_concessao` | — | horizonte do sistema = fim da concessão da cidade |
 | `sub_bacias` / `sub_bacias_faturando` | BIGINT | quantas atende e quantas faturam |
-| `ete_id` / `ete_nova` / `ete_responsavel` | TEXT | a ETE do sistema |
+| `ete_id` / `ete_responsavel` | TEXT | a ETE do sistema |
+| `ete_nova` | BOOLEAN | ETE nova × ampliação de existente. Declarada em `TIPOS_FIXOS`: as fixtures não têm ETE, então seria inferida TEXT e o front compararia string |
 | `capacidade_modulo` / `capex_modulo` / `capex_terreno` | DOUBLE PRECISION | economia de um módulo |
 | `modulos_disponiveis` / `modulos_construidos` | BIGINT | universo × plano |
 | `capex_modulos_construidos` | DOUBLE PRECISION | soma do CAPEX dos módulos que entraram |

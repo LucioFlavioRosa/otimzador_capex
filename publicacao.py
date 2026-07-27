@@ -99,6 +99,9 @@ TIPOS_FIXOS = {"data_hora": "TIMESTAMPTZ", "milp_bound": "DOUBLE PRECISION",
                "pot_vp_capex_rateado": "DOUBLE PRECISION", "pot_vp_opex": "DOUBLE PRECISION",
                "pot_saldo_solo": "DOUBLE PRECISION", "pot_saldo_rateado": "DOUBLE PRECISION",
                "pot_obras_faltantes": "BIGINT",               # len(inicio_r): contagem
+               "ete_nova": "BOOLEAN",                         # bool(e.nova) em persistencia
+               # (as fixtures nao tem ETE, entao a coluna sai toda nula e seria inferida
+               #  TEXT; o front compararia string em vez de booleano)
                "capex_modulo": "DOUBLE PRECISION", "capex_terreno": "DOUBLE PRECISION",
                "capex_modulos_construidos": "DOUBLE PRECISION"}   # sum(m.capex ...)
 # colunas de servico que o front consome e que nao vem do engine
@@ -451,17 +454,30 @@ def publicar(tabs, pg=None, blob=None, notificar=None, schema="public",
                     pass
 
     pay = _payload(tabs, blob_uri=burl, extra={"rotulo": rotulo, "usuario": usuario})
+    # A notificacao roda DEPOIS do commit e NAO pode derrubar a rodada: se a fila ou o
+    # webhook estiverem fora do ar, os dados ja estao publicados e o status ja e SUCESSO.
+    # Deixar a excecao subir faria o job marcar ERRO por cima de um SUCESSO valido — o
+    # operador reprocessaria uma rodada intacta. O backend nao depende do evento: ele e
+    # so um aviso para invalidar cache; o estado da verdade e controle.run_status.
     if notificar:
         if notificar.get("service_bus"):
-            notificar_service_bus(notificar["service_bus"],
-                                  notificar.get("topico") or notificar.get("fila"),
-                                  pay, e_topico=bool(notificar.get("topico")))
-            if verbose:
-                print(f"Service Bus: evento publicado (run_id={rid})")
+            try:
+                notificar_service_bus(notificar["service_bus"],
+                                      notificar.get("topico") or notificar.get("fila"),
+                                      pay, e_topico=bool(notificar.get("topico")))
+                if verbose:
+                    print(f"Service Bus: evento publicado (run_id={rid})")
+            except Exception as e:
+                print(f"AVISO: rodada {rid} publicada, mas a notificacao por Service Bus "
+                      f"falhou ({type(e).__name__}: {e}). O dado esta no banco.")
         if notificar.get("webhook"):
-            st, corpo = notificar_webhook(notificar["webhook"], pay, notificar.get("token"))
-            if verbose:
-                print(f"Webhook: HTTP {st}  {corpo[:120]}")
+            try:
+                st, corpo = notificar_webhook(notificar["webhook"], pay, notificar.get("token"))
+                if verbose:
+                    print(f"Webhook: HTTP {st}  {corpo[:120]}")
+            except Exception as e:
+                print(f"AVISO: rodada {rid} publicada, mas o webhook falhou "
+                      f"({type(e).__name__}: {e}). O dado esta no banco.")
     if verbose:
         print(f"\nrodada {rid} publicada e disponivel para o front.")
     return pay

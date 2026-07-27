@@ -119,6 +119,18 @@ def _tabs_sadias(run_id="r1"):
                                   "excesso": 0.0}]),
         "run_cidade_ano": pd.DataFrame([{"run_id": run_id, "cidade": "c1",
                                          "ano": 2026, "capex": 100.0}]),
+        # os nomes destas duas colunas importam: o portao procurava `deficit` e
+        # `cobertura`, que NAO existem — as checagens ficavam mudas (ver test abaixo).
+        "run_meta_cobertura": pd.DataFrame([{"run_id": run_id, "cidade": "c1", "ano": 2026,
+                                             "deficit_ligacoes": 0.0, "atingida": True}]),
+        "run_cobertura": pd.DataFrame([{"run_id": run_id, "cidade": "c1", "ano": 2026,
+                                        "cobertura_pct": 80.0}]),
+        # sem estas duas, as checagens de CAPEX mensal e de rateio nao rodam — e o
+        # conjunto deixaria de exercitar as 14 criticas.
+        "run_mes": pd.DataFrame([{"run_id": run_id, "mes_indice": 0, "ano": 2026,
+                                  "capex_mes": 100.0}]),
+        "run_dependencia": pd.DataFrame([{"run_id": run_id, "obra_id": "o1",
+                                          "sub_bacia": "b1", "fracao_rateio": 1.0}]),
     }
 
 
@@ -177,6 +189,54 @@ def test_portao_reprova_capex_sem_teto():
     assert any("teto definido" in r["check"] and not r["ok"] for r in rel)
 
 
+def test_portao_reprova_deficit_de_meta_negativo():
+    """Esta checagem existia mas NUNCA rodava: procurava a coluna `deficit`, e
+    persistencia grava `deficit_ligacoes`. Como as checagens sao condicionais a existencia
+    da coluna, ela silenciava — o relatorio vinha com uma checagem a menos e ninguem via."""
+    t = _tabs_sadias()
+    t["run_meta_cobertura"] = t["run_meta_cobertura"].assign(deficit_ligacoes=-50.0)
+    ok, rel, _ = Q.checar(None, RES_OK, t)
+    assert not ok
+    assert any("deficit" in r["check"].lower() and not r["ok"] for r in rel)
+
+
+def test_portao_reprova_cobertura_negativa():
+    """Mesma historia: procurava `cobertura`, a coluna e `cobertura_pct`."""
+    t = _tabs_sadias()
+    t["run_cobertura"] = t["run_cobertura"].assign(cobertura_pct=-1.0)
+    ok, rel, _ = Q.checar(None, RES_OK, t)
+    assert not ok
+    assert any("Cobertura" in r["check"] and not r["ok"] for r in rel)
+
+
+def test_portao_roda_14_checagens_criticas():
+    """Trava o numero: se uma checagem voltar a procurar coluna inexistente, ela some do
+    relatorio em silencio e este teste acusa."""
+    _, rel, _ = Q.checar(None, RES_OK, _tabs_sadias())
+    assert len([r for r in rel if r["nivel"] == "critico"]) == 14
+
+
+# ------------------------------------------------- notificacao pos-commit
+def test_falha_de_notificacao_nao_derruba_a_publicacao(monkeypatch):
+    """A notificacao roda DEPOIS do commit. Se ela levantasse, a excecao subiria ate o
+    `except` de rodar(), que marcaria ERRO por cima de um SUCESSO ja gravado — com os dados
+    publicados e visiveis. O operador reprocessaria uma rodada intacta."""
+    import publicacao as PUB
+
+    def explode(*a, **k):
+        raise RuntimeError("fila fora do ar")
+
+    monkeypatch.setattr(PUB, "notificar_service_bus", explode)
+    monkeypatch.setattr(PUB, "notificar_webhook", explode)
+    tabs = _tabs_sadias()
+    tabs["run_meta"] = tabs["run_meta"].assign(data_hora="2026-07-27T00:00:00")
+    # pg=None e blob=None: exercita so o trecho de notificacao
+    pay = PUB.publicar(tabs, pg=None, blob=None, verbose=False,
+                       notificar={"service_bus": "sb://x", "fila": "q",
+                                  "webhook": "https://x", "token": "t"})
+    assert pay["run_id"] == "r1"
+
+
 # ------------------------------------------------------- run_id da rodada
 def test_materializar_respeita_o_run_id_da_rodada():
     """Sem `run_id=` a materializacao gera um id novo: controle.* e public.otim_* deixam
@@ -193,3 +253,54 @@ def test_materializar_respeita_o_run_id_da_rodada():
         if nome.startswith("snapshot__") or "run_id" not in df.columns:
             continue
         assert set(df["run_id"].unique()) <= {"run_fixo_123"}, nome
+
+
+# --------------------------------------------- snapshot do cadastro (blob)
+def test_materializar_gera_snapshot_do_arquivo_fonte():
+    """O job rotula a origem como 'postgres://input', que nao existe em disco. Sem
+    `arquivo_fonte`, `os.path.exists(banco)` e falso e a rodada sai SEM snapshot__*:
+    o blob receberia as run_* mas nao a copia congelada do cadastro, e "refazer a mesma
+    rodada meses depois" deixaria de ser possivel."""
+    pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
+    import dashboard_otimizador_v2 as D
+    import persistencia as P
+    from _helpers import BANK_CTS, load_cts, build_all, silent
+    M = engine()
+    D.set_engine(M); P.set_engine(M, D)
+    cen = load_cts(True)
+    res = build_all(cen)
+
+    sem = silent(P.materializar, cen, res, run_id="r", banco="postgres://input")
+    assert not [k for k in sem if k.startswith("snapshot__")]
+    assert sem["run_meta"].iloc[0]["banco_md5"] is None
+
+    com = silent(P.materializar, cen, res, run_id="r", banco="postgres://input",
+                 arquivo_fonte=BANK_CTS)
+    assert len([k for k in com if k.startswith("snapshot__")]) >= 10
+    assert com["run_meta"].iloc[0]["banco_md5"]
+    # a proveniencia continua sendo o rotulo, nao o caminho do arquivo temporario
+    assert com["run_meta"].iloc[0]["banco_arquivo"] == "postgres://input"
+
+
+# ------------------------------------------- tabela obrigatoria mas vazia
+def test_tabela_obrigatoria_vazia_e_erro(monkeypatch, tmp_path):
+    """Tabela VAZIA nao e o mesmo que ausente. Um metas_cobertura existente porem vazio
+    (carga interrompida, TRUNCATE indevido) produziria um Cenario sem metas, que resolve,
+    passa no portao e publica SUCESSO."""
+    import pandas as pd
+    import carregar_postgres as C
+
+    def read_sql_falso(sql, con, **kw):
+        # tudo com uma linha, menos metas_cobertura, que volta vazia
+        vazia = "metas_cobertura" in str(sql)
+        return pd.DataFrame() if vazia else pd.DataFrame([{"a": 1}])
+
+    monkeypatch.setattr(C, "_engine_sqlalchemy", lambda url: _EngineFalsa())
+    monkeypatch.setattr(pd, "read_sql", read_sql_falso)
+    with pytest.raises(RuntimeError, match="VAZIA"):
+        C.snapshot_input_para_xlsx("postgresql://x", str(tmp_path / "s.xlsx"))
+
+
+class _EngineFalsa:
+    def dispose(self):
+        pass

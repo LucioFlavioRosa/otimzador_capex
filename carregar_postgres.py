@@ -86,7 +86,16 @@ def snapshot_input_para_xlsx(pg_url, destino_xlsx, schema="input"):
                     raise RuntimeError(
                         f"falha ao ler {schema}.{tabela} (aba '{aba}'): {e}") from e
                 if df is None or len(df) == 0:
-                    continue
+                    # tabela VAZIA nao e o mesmo que ausente. Um `metas_cobertura` que
+                    # exista mas esteja vazio (carga do front interrompida, TRUNCATE
+                    # indevido) produziria um Cenario sem metas, que resolve, passa no
+                    # portao e publica como SUCESSO. So as opcionais podem vir vazias.
+                    if aba in ABAS_OPCIONAIS:
+                        continue
+                    raise RuntimeError(
+                        f"{schema}.{tabela} (aba '{aba}') existe mas esta VAZIA. "
+                        f"Se a rodada realmente nao deve ter esses dados, inclua a aba em "
+                        f"carregar_postgres.ABAS_OPCIONAIS.")
                 # o Excel limita o nome da aba a 31 chars e o motor le pelo nome EXATO:
                 # um nome mais longo seria truncado e a aba sumiria em silencio.
                 if len(aba) > 31:
@@ -99,26 +108,37 @@ def snapshot_input_para_xlsx(pg_url, destino_xlsx, schema="input"):
     return escritas
 
 
-def carregar_postgres(pg_url, schema="input", **params):
+def carregar_postgres(pg_url, schema="input", snapshot_para=None, **params):
     """Le o input do Postgres e devolve o Cenario (via ler_banco sobre um xlsx temporario).
 
     `params` sao os parametros da rodada (os mesmos da celula PARAMETROS do notebook):
     orcamento, unidade, base_receita, usar_cts, incluir_industrial, foco_cobertura,
     penalidade_cobertura, anos_extra_conclusao, ete_faseada, etc.
+
+    `snapshot_para`: caminho onde MANTER o xlsx materializado, em vez de apaga-lo. Ele e a
+    copia congelada do cadastro daquela rodada — o job passa esse caminho para
+    `materializar(arquivo_fonte=...)` e assim as tabelas snapshot__* e o banco_md5 existem.
+    Sem isso a camada de reproducao/auditoria fica vazia: o arquivo era apagado aqui antes
+    de qualquer um poder usa-lo. Quem pede e responsavel por apagar depois.
     """
     import otimizador_capex_v62 as M      # o motor (mesmo do caminho Excel)
-    tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
-    tmp.close()
+    if snapshot_para:
+        destino, apagar = snapshot_para, False
+    else:
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        tmp.close()
+        destino, apagar = tmp.name, True
     try:
-        abas = snapshot_input_para_xlsx(pg_url, tmp.name, schema=schema)
+        abas = snapshot_input_para_xlsx(pg_url, destino, schema=schema)
         if "subbacia-operacional" not in abas:
             raise RuntimeError("input incompleto no Postgres: falta 'subbacia_operacional'")
-        return M.ler_banco(tmp.name, **params)
+        return M.ler_banco(destino, **params)
     finally:
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
+        if apagar:
+            try:
+                os.unlink(destino)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------

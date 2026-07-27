@@ -28,7 +28,7 @@ python -m pip install -r requirements-prod.txt
 python -m pytest -q tests/
 ```
 
-Esperado: **55 passed, 13 skipped**. Os 13 skips são normais — 12 precisam de Postgres
+Esperado: **61 passed, 13 skipped**. Os 13 skips são normais — 12 precisam de Postgres
 (nível B) e 1 precisa de uma suíte legada que não acompanha o pacote. Detalhes em
 [`04-testes-executar.md`](04-testes-executar.md).
 
@@ -59,7 +59,7 @@ memória e passa o portão de qualidade. Saída:
   tempo                                   0.2s
 ```
 
-Seguido do relatório do portão, com as 12 checagens críticas. **Esse relatório é o mesmo que
+Seguido do relatório do portão, com as 14 checagens críticas. **Esse relatório é o mesmo que
 roda em produção antes de publicar** — se ele reprova, a rodada não vai para o banco.
 
 ### A.2 Os bancos disponíveis

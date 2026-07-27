@@ -3,8 +3,8 @@
 Público: quem vai mudar o código e precisa saber **o que já está protegido** e **o que não
 está**. Também serve como especificação executável: cada teste é uma regra de negócio escrita.
 
-Panorama: **68 testes em 7 arquivos**, mais o **portão de qualidade por rodada** (12 checagens
-críticas), que é um mecanismo diferente e complementar — ver §5.6.
+Panorama: **74 testes em 7 arquivos**, mais o **portão de qualidade por rodada** (14 checagens
+críticas), que é um mecanismo diferente e complementar — ver §5.8.
 
 ---
 
@@ -76,7 +76,7 @@ invariante de otimalidade `VPL(solver) ≥ VPL(build-all)`.
 Este é o teste que decide se uma refatoração foi neutra. Atualizar o golden é uma decisão
 consciente — ver `04-testes-executar.md` §4.6.
 
-## 5.6 `test_producao.py` — a camada de produção (25 testes)
+## 5.6 `test_producao.py` — a camada de produção (31 testes)
 
 Nenhum precisa de banco. Cobrem os bugs mais caros encontrados na revisão do pacote.
 
@@ -94,7 +94,7 @@ Nenhum precisa de banco. Cobrem os bugs mais caros encontrados na revisão do pa
 - Chaves do job (`USUARIO`, `MAX_TIME_S`, `WORKERS`) não viram kwarg do motor.
 - Todas as chaves conhecidas são traduzidas.
 
-### Portão de qualidade (10 testes)
+### Portão de qualidade (13 testes)
 
 - **Aprova uma rodada sadia.**
 - **Aceita os status que o CP-SAT realmente devolve** — `OTIMO`, `OTIMO | OBRIG 3/3`,
@@ -149,7 +149,14 @@ Pulam sem `OTIMIZADOR_PG_TESTE`. **Ainda não foram executados** — ver
 
 Não é pytest — roda **em toda rodada**, depois de otimizar e antes de publicar. Se qualquer
 checagem **crítica** falhar, o job marca `FALHOU_QUALIDADE`, grava o relatório em
-`controle.run_diagnostico` e **não publica**.
+`controle.run_diagnostico` e **não publica**. São **14 críticas + 1 aviso**.
+
+> Até a revisão de 2026-07-27, duas destas checagens (déficit de meta e cobertura
+> não-negativa) **nunca executavam**: procuravam as colunas `deficit` e `cobertura`, mas
+> `persistencia` grava `deficit_ligacoes` e `cobertura_pct`. Como toda checagem é
+> condicional à existência da coluna, elas silenciavam em vez de falhar — o relatório vinha
+> com 12 linhas e ninguém notava as duas faltando. `test_portao_roda_14_checagens_criticas`
+> agora trava esse número.
 
 | # | Checagem | Nível | O que pega |
 |---|---|---|---|
@@ -195,7 +202,7 @@ Honestidade sobre as lacunas, para ninguém confiar demais na suíte verde:
 
 **Onde investir primeiro**, em ordem de retorno:
 
-1. **Executar** os 10 testes de `test_publicacao_postgres.py` (já escritos) e corrigir o que
+1. **Executar** os 12 testes de `test_publicacao_postgres.py` (já escritos) e corrigir o que
    aparecer.
 2. Teste fim-a-fim de `rodar()` contra um Postgres com o cadastro de fixture carregado — pega a
    orquestração inteira, inclusive `carregar_postgres`.

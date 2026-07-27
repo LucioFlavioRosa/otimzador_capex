@@ -97,8 +97,19 @@ def _j(x):
 #  MATERIALIZACAO
 # =============================================================================
 def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapshot=True,
-                 economia=True):
-    """cen + res -> dict {nome_tabela: DataFrame}. Nao escreve nada em disco."""
+                 economia=True, arquivo_fonte=None):
+    """cen + res -> dict {nome_tabela: DataFrame}. Nao escreve nada em disco.
+
+    `banco` e o ROTULO da origem, gravado em run_meta.banco_arquivo. No caminho Excel ele
+    e o proprio caminho do arquivo; no caminho Postgres e algo como 'postgres://input',
+    que descreve a origem mas nao existe em disco.
+
+    `arquivo_fonte` (opcional) e o ARQUIVO de onde tirar o snapshot__* e o banco_md5,
+    quando ele nao coincide com o rotulo. E o que permite o job do Postgres preservar a
+    copia congelada do cadastro — sem isso, `_os.path.exists('postgres://input')` e falso
+    e a rodada sai sem snapshot nenhum, quebrando a reproducao/auditoria.
+    """
+    fonte = arquivo_fonte or banco
     M = _eng()
     rid = run_id or novo_run_id()
     reg = list(cen.regionais)[0]
@@ -122,7 +133,7 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
         "engine_arquivo": getattr(M, "__file__", None),
         "engine_md5": _md5(getattr(M, "__file__", "") or ""),
         "banco_arquivo": banco,
-        "banco_md5": _md5(banco) if banco else None,
+        "banco_md5": _md5(fonte) if fonte else None,
         "regional": reg,
         "anos_horizonte": anos,
         "anos_capex": ac,
@@ -416,8 +427,8 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
         columns=["run_id", "tipo", "ano", "gasto", "teto", "excesso", "detalhe"])
 
     # -------------------------------------------------------------- snapshot
-    if incluir_snapshot and banco and _os.path.exists(banco):
-        for aba, df in snapshot_banco(banco, rid).items():
+    if incluir_snapshot and fonte and _os.path.exists(fonte):
+        for aba, df in snapshot_banco(fonte, rid).items():
             T[aba] = df
     return T
 

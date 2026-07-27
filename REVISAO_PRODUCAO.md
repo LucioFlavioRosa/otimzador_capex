@@ -6,7 +6,7 @@ Revisão de código do pacote de produção (Databricks + Azure Postgres), no es
 
 Alvo: Python 3.10+, Databricks Runtime.
 
-> **Estado: TUDO APLICADO** (D1–D9), na ordem sugerida. Suíte: **55 passed, 13 skipped**
+> **Estado: TUDO APLICADO** (D1–D9), na ordem sugerida. Suíte: **61 passed, 13 skipped**
 > (baseline era 30 passed, 1 failed). Dois achados novos — **C6** e **A6** — só apareceram
 > ao *executar* o portão, e estão marcados como tal. O achado **C4** foi corrigido no
 > diagnóstico depois do teste: a consequência não era publicação silenciosa, e sim um
@@ -950,7 +950,7 @@ valor golden foi alterado.
 ### Verificações executadas
 
 ```
-pytest -q tests/                       ->  55 passed, 13 skipped
+pytest -q tests/                       ->  61 passed, 13 skipped
 ```
 
 Portão sobre uma materialização real (banco de teste CTS + CP-SAT, `run_id` fixo):
@@ -974,7 +974,7 @@ Nada nesta revisão tocou um Postgres de verdade. `_transacao`, o commit único 
 `DELETE`+`CASCADE` da republicação e as FKs/PKs do DDL estão **corretos por leitura, não por
 teste**.
 
-Os testes que provam isso já estão escritos — `tests/test_publicacao_postgres.py`, 10 testes —
+Os testes que provam isso já estão escritos — `tests/test_publicacao_postgres.py`, 12 testes —
 mas **nunca foram executados**: não há Postgres nesta máquina (Docker CLI instalado, daemon
 parado; nenhum `psql`/serviço local). Eles pulam sozinhos sem `OTIMIZADOR_PG_TESTE`, então o
 CI offline continua verde. O que foi verificado offline: o módulo coleta, e `_ddl_controle`

@@ -1,3 +1,14 @@
+> ⚠️ **DOCUMENTO HISTÓRICO — superado pela implementação.**
+> Este é o plano original, mantido como registro das decisões de arquitetura (§1 e §4 seguem
+> válidos e valem a leitura). Os números e estados **estão desatualizados**: fala em "26
+> testes" (são 74), "13 tabelas `run_*`" (são 14), Fase 4 como "esqueleto" com TODOs que já
+> foram feitos, e caminhos `producao/*` que não existem — o pacote é flat.
+>
+> Para o estado atual: [`docs/README.md`](docs/README.md) (documentação por assunto) e
+> [`REVISAO_PRODUCAO.md`](REVISAO_PRODUCAO.md) (o que foi revisado, corrigido e o que
+> continua sem prova de execução). O checklist de revisão do §6 aqui foi respondido item a
+> item na §3 da REVISAO.
+
 # Otimizador de CAPEX — Produção no Databricks (Azure) com Postgres
 
 Plano em fases para levar o otimizador de esgoto a um **job no Databricks** que lê o input de

@@ -28,8 +28,8 @@ Se você não vai rodar o pipeline, o mínimo para a suíte é:
 
 ```
 $ python -m pytest tests/
-68 collected
-55 passed, 13 skipped in 2.9s
+74 collected
+61 passed, 13 skipped in 2.6s
 ```
 
 | Arquivo | Testes |
@@ -39,7 +39,7 @@ $ python -m pytest tests/
 | `test_classe.py` | 7 |
 | `test_derivadas.py` | 2 |
 | `test_regressao_golden.py` | 4 |
-| `test_producao.py` | 25 |
+| `test_producao.py` | 31 |
 | `test_publicacao_postgres.py` | 12 |
 
 **Os 13 skips são esperados**, não são falha:
@@ -49,7 +49,9 @@ $ python -m pytest tests/
 | 12 | `test_publicacao_postgres.py` | precisa de um Postgres | definir `OTIMIZADOR_PG_TESTE` (§4.4) |
 | 1 | `test_nucleo.py::test_separabilidade_por_cidade_e_exata` | importa `testes_otimizador`, a suíte legada que **não acompanha** este pacote | copiar `testes_otimizador.py` para a pasta |
 
-Sem OR-Tools instalado, mais 4 testes (marcados `solver`) pulam. Sem matplotlib, mais 1.
+São 5 testes marcados `solver`; um deles (a separabilidade) já está entre os 13 skips acima,
+então sem OR-Tools instalado o total sobe para 17 — mais 4 do que o normal. Sem matplotlib,
+mais 1.
 **Nenhum skip é aceitável em vermelho:** se um teste *falhar* em vez de pular, é bug.
 
 ---
@@ -150,7 +152,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - run: pip install -r requirements-prod.txt
-      - run: pytest -q tests/          # 55 passed, 13 skipped
+      - run: pytest -q tests/          # 61 passed, 13 skipped
 
   com-postgres:
     runs-on: ubuntu-latest

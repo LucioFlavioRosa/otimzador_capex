@@ -224,7 +224,13 @@ do Service Bus; os dois convivem.
 | Widget | `run_id` (string, obrigatório) |
 | Retries | **0 ou 1.** O job já é idempotente, mas retry automático mascara falha de dados; prefira retry deliberado pelo operador |
 | Timeout | `MAX_TIME_S` + folga para carga e publicação (ex.: 900 s para `MAX_TIME_S=300`) |
-| Alertas | notificar em falha — o job **re-levanta** a exceção depois de marcar `ERRO`, então falha visível no Databricks |
+| Alertas | notificar em falha — cobre **`ERRO`** apenas: o job re-levanta a exceção depois de marcar o status, e o run aparece como falho no Databricks |
+
+> ⚠️ **`FALHOU_QUALIDADE` não faz o job falhar.** `rodar()` retorna normalmente nesse caso —
+> é um resultado (a rodada foi calculada, mas reprovou), não uma falha técnica. O alerta do
+> Databricks **não dispara**. Quem precisa detectar reprovação de qualidade tem de monitorar
+> `controle.run_status`, não o estado do job. Se você preferir que também falhe o run, é uma
+> linha em `job_databricks.rodar`: levantar em vez de retornar no ramo `if not ok`.
 
 ---
 

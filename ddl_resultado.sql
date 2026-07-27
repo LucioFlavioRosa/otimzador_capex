@@ -201,7 +201,7 @@ CREATE TABLE IF NOT EXISTS public.otim_sistema (
     sub_bacias BIGINT,
     sub_bacias_faturando BIGINT,
     ete_id TEXT,
-    ete_nova TEXT,
+    ete_nova BOOLEAN,
     ete_responsavel TEXT,
     folga_inicial DOUBLE PRECISION,
     capacidade_modulo DOUBLE PRECISION,

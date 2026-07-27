@@ -149,14 +149,18 @@ def checar(cen, res, tabs, tol: float = TOL):
     add("Integridade: colunas-chave sem NaN", not faltas, f"NaN em: {faltas}" if faltas else "ok")
 
     # ---- 6. metas de cobertura: deficit coerente (>= 0) ------------------------
-    if rmc is not None and "deficit" in rmc.columns and len(rmc):
-        neg = int((rmc["deficit"] < -tol).sum())
+    # a coluna chama-se `deficit_ligacoes` (persistencia.py). Enquanto isto procurava
+    # "deficit", a checagem era condicional a uma coluna inexistente: nunca rodava, e
+    # ninguem percebia — o relatorio simplesmente vinha com uma checagem a menos.
+    if rmc is not None and "deficit_ligacoes" in rmc.columns and len(rmc):
+        neg = int((rmc["deficit_ligacoes"] < -tol).sum())
         add("Metas: deficit nao-negativo", neg == 0, f"{neg} meta(s) com deficit negativo",
             nivel="critico")
 
     # ---- 7. cobertura sana (nao-negativa) --------------------------------------
-    if rcob is not None and "cobertura" in rcob.columns and len(rcob):
-        neg = int((rcob["cobertura"] < -tol).sum())
+    # idem: a coluna e `cobertura_pct`, nao `cobertura`.
+    if rcob is not None and "cobertura_pct" in rcob.columns and len(rcob):
+        neg = int((rcob["cobertura_pct"] < -tol).sum())
         add("Cobertura: valores nao-negativos", neg == 0, f"{neg} linha(s) negativa(s)")
 
     # ---- 8. plano nao-vazio (aviso, nao bloqueia) ------------------------------

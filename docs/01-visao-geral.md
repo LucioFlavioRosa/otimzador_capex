@@ -45,7 +45,7 @@ Toda a leitura e escrita vive em **adaptadores** ao redor:
 
 Consequências práticas — é por isso que vale a pena manter:
 
-1. **A suíte de testes existe.** 55 dos 68 testes rodam sem banco, sem rede e sem credencial,
+1. **A suíte de testes existe.** 61 dos 74 testes rodam sem banco, sem rede e sem credencial,
    em ~2 s (os outros 13 pulam: 12 precisam de Postgres, 1 precisa da suíte legada). Se o
    motor tivesse SQL dentro, nada disso seria testável.
 2. **O caminho Excel continua funcionando.** `ler_banco(<arquivo.xlsx>)` é o caminho de
@@ -141,7 +141,7 @@ para chegar a um resultado". A ação do operador é diferente em cada caso — 
 | Quando | toda rodada, antes de publicar | todo merge |
 | Se falhar | `FALHOU_QUALIDADE`, não publica | não faz deploy |
 
-São coisas distintas e ambas obrigatórias. O portão de rodada tem 12 checagens críticas +
+São coisas distintas e ambas obrigatórias. O portão de rodada tem 14 checagens críticas +
 1 aviso (detalhadas em `05-testes-cobertura.md` §5).
 
 ---
@@ -226,7 +226,7 @@ cidade no ano**. É endógena — depende do próprio plano.
 | 1 — Modelo de dados (`ddl_input.sql`) | pronto, com PKs/FKs/tipos revisados |
 | 2 — Adaptador Postgres → Cenário | pronto; usa `.xlsx` temporário |
 | 2b — `ler_banco` aceitando dict de DataFrames | **não feito** — proposital, ver abaixo |
-| 3 — Portão de qualidade | pronto, 12 checagens críticas |
+| 3 — Portão de qualidade | pronto, 14 checagens críticas |
 | 4 — Orquestração do job | pronto |
 | 5 — Wheel + CI | **a fazer** |
 
