@@ -1,0 +1,289 @@
+-- ============================================================================
+-- DDL — INPUT (cadastro) + CONTROLE  (Postgres/Azure)
+-- As tabelas run_* de RESULTADO tem DDL propria em publicacao.ddl_postgres(tabs).
+--
+-- Este script e para BANCO NOVO (roda inteiro, na ordem). Para um banco que ja
+-- existe sem chaves/tipos, use `ddl_input_migracao_01.sql`.
+--
+-- Decisoes desta versao (ver REVISAO_PRODUCAO.md, achados A5/M1/M2/C4):
+--   • PK em toda tabela. Duplicata no cadastro corrompe o plano EM SILENCIO: em
+--     `subbacia-operacional` a ultima linha vence (some uma sub-bacia) e em
+--     `componentes-*-capex` a obra e DUPLICADA (o CAPEX conta duas vezes). Nenhum
+--     dos dois aparece como erro — as reconciliacoes do portao fecham normalmente.
+--   • FK nas tabelas de HIERARQUIA, que o motor navega. Elo quebrado = sub-bacia
+--     orfa, que some do resultado sem aviso.
+--   • Tipos numericos onde o gerador inferiu `text`/`integer` por amostra: em
+--     coluna `integer` o Postgres ARREDONDA em silencio (meta de 90,5% vira 90;
+--     crescimento de 1,5 vira 2).
+--   • As colunas de comentario que vazaram do Excel de amostra ("Unnamed: 3" e a
+--     coluna cujo nome era uma frase inteira) viraram COMMENT ON COLUMN.
+-- ============================================================================
+CREATE SCHEMA IF NOT EXISTS input;
+CREATE SCHEMA IF NOT EXISTS controle;
+
+-- ---- HIERARQUIA -----------------------------------------------------------
+-- aba do motor: unidade-regional
+CREATE TABLE IF NOT EXISTS input.unidade_regional (
+    unidade_id    text PRIMARY KEY,
+    unidade_name  text,
+    regional_id   text NOT NULL,
+    regional_name text,
+    wacc_medio    double precision
+);
+
+-- aba do motor: regional-superintendencia
+CREATE TABLE IF NOT EXISTS input.regional_superintendencia (
+    superintendencia_id   text PRIMARY KEY,
+    superintendencia_name text,
+    unidade_id            text NOT NULL
+        REFERENCES input.unidade_regional(unidade_id)
+);
+
+-- aba do motor: superintendencia-cidade
+CREATE TABLE IF NOT EXISTS input.superintendencia_cidade (
+    cidade_id           text PRIMARY KEY,
+    cidade_name         text,
+    superintendencia_id text NOT NULL
+        REFERENCES input.regional_superintendencia(superintendencia_id)
+);
+
+-- aba do motor: cidade-sistema
+CREATE TABLE IF NOT EXISTS input.cidade_sistema (
+    sistema_id   text PRIMARY KEY,
+    sistema_name text,
+    cidade_id    text NOT NULL
+        REFERENCES input.superintendencia_cidade(cidade_id)
+);
+
+-- aba do motor: sistema-topologia
+-- PK em `componente_sistema_id` SOZINHO, e nao no par com o sistema: o motor indexa os nos
+-- por id GLOBAL — `self.nos = {n.id: n for n in nos}` (otimizador_capex_v62.py:63). Um id
+-- repetido em outro sistema seria aceito pelo banco e o motor manteria so o ultimo,
+-- perdendo um no inteiro em silencio.
+CREATE TABLE IF NOT EXISTS input.sistema_topologia (
+    componente_sistema_id         text PRIMARY KEY,
+    componente_sistema_nome       text,
+    sistema_id                    text NOT NULL
+        REFERENCES input.cidade_sistema(sistema_id),
+    componente_sistema_id_jusante text
+);
+
+-- ---- OPERACIONAL ----------------------------------------------------------
+-- aba do motor: cidade-operacional
+CREATE TABLE IF NOT EXISTS input.cidade_operacional (
+    cidade_id          text PRIMARY KEY
+        REFERENCES input.superintendencia_cidade(cidade_id),
+    data_fim_concessao integer,
+    unidade_cobertura  text
+);
+COMMENT ON COLUMN input.cidade_operacional.unidade_cobertura IS
+    'ligacoes | economias | populacao. Define a REGUA da meta e da faixa de paridade '
+    'daquela cidade. A receita continua sempre em ligacoes.';
+
+-- aba do motor: subbacia-operacional
+CREATE TABLE IF NOT EXISTS input.subbacia_operacional (
+    sub_bacia                       text PRIMARY KEY,
+    preco_por_ligacao               double precision,
+    receita_faturada_media_mensal   double precision,
+    receita_arrecadada_media_mensal double precision,
+    tempo_arrecadacao               integer,
+    tempo_ramp_up                   integer,
+    vazao_contribuicao              double precision,
+    universo_ligacoes               integer,
+    ligacoes_atuais                 integer,
+    ligacoes_novas_obras            integer,
+    universo_economias              integer,
+    economias_atuais                integer,
+    economias_novas_obras           integer,
+    universo_populacao              double precision,
+    populacao_atual                 double precision,
+    populacao_novas_obras           double precision,
+    potencial_crescimento           double precision,
+    universo_ligacoes_industrial    integer,
+    ligacoes_atuais_industrial      integer,
+    receita_faturada_industrial     double precision,
+    receita_arrecadada_industrial   double precision,
+    vazao_contribuicao_industrial   double precision
+);
+COMMENT ON COLUMN input.subbacia_operacional.universo_ligacoes_industrial IS
+    'PARCELA industrial, JA CONTIDA no total. As colunas sem sufixo (universo_ligacoes, '
+    'receita_*, vazao_contribuicao) sao o TOTAL = residencial + industrial. Com '
+    'INCLUIR_INDUSTRIAL=True usa-se o total como esta; com False, residencial = total '
+    '- industrial. Nunca somar.';
+
+-- aba do motor: componentes-subbacias-capex
+CREATE TABLE IF NOT EXISTS input.componentes_subbacias_capex (
+    sub_bacia            text NOT NULL
+        REFERENCES input.subbacia_operacional(sub_bacia),
+    componente           text NOT NULL,
+    quantidade           double precision,
+    unidade              text,
+    preco_unitario       double precision,
+    capex                double precision,
+    opex                 double precision,
+    tempo_predecessoras  integer,
+    tempo_execucao       integer,
+    obra_obrigatoria_ano integer,
+    obra_proibida_ate    integer,
+    wacc                 double precision,
+    PRIMARY KEY (sub_bacia, componente)
+);
+COMMENT ON COLUMN input.componentes_subbacias_capex.obra_obrigatoria_ano IS
+    '0 = nao e obrigatoria; -1 = obrigatoria em qualquer ano; AAAA = obrigatoria naquele ano.';
+COMMENT ON COLUMN input.componentes_subbacias_capex.obra_proibida_ate IS
+    '0 = sem restricao; AAAA = ano ate o qual a obra nao pode comecar.';
+COMMENT ON COLUMN input.componentes_subbacias_capex.capex IS
+    'CAPEX 0 com tempo_execucao > 0 = obra de TERCEIROS: entra no cronograma, nao no orcamento.';
+
+-- aba do motor: ete-capex
+CREATE TABLE IF NOT EXISTS input.ete_capex (
+    ete_id                   text PRIMARY KEY,
+    capacidade_por_modulo    double precision,
+    capex_por_modulo         double precision,
+    opex_por_modulo          double precision,
+    tempo_predecessoras      integer,
+    tempo_de_execucao        integer,
+    capacidade_nominal_atual double precision,
+    vazao_de_operacao_atual  double precision,
+    capacidade_ociosa        double precision,
+    obra_obrigatoria_ano     integer,
+    obra_proibida_ate        integer,
+    nova                     text,
+    capex_terreno            double precision,
+    modulos                  integer,
+    wacc                     double precision
+);
+
+-- aba do motor: regional-operacional
+CREATE TABLE IF NOT EXISTS input.regional_operacional (
+    regional_id text PRIMARY KEY,
+    ano_base    integer
+);
+
+-- aba do motor: orcamento
+-- FALLBACK do teto de CAPEX quando ORCAMENTO nao vem no run_request. Sem esta tabela
+-- E sem o parametro, o motor usa INF: no caminho do solver isso estoura la dentro do
+-- CP-SAT com "OverflowError: cannot convert float infinity to integer".
+CREATE TABLE IF NOT EXISTS input.orcamento (
+    regional_id text PRIMARY KEY,
+    valor_ano   double precision NOT NULL
+);
+
+-- ---- METAS E PARIDADE -----------------------------------------------------
+-- Sem FK para cidade de proposito: metas e faixas costumam ser carregadas antes do
+-- cadastro completo da cidade. O indice cobre o acesso do motor.
+-- aba do motor: metas-cobertura
+CREATE TABLE IF NOT EXISTS input.metas_cobertura (
+    cidade_id     text NOT NULL,
+    ano           integer NOT NULL,
+    cobertura_pct double precision,
+    PRIMARY KEY (cidade_id, ano)
+);
+
+-- aba do motor: fator-esgoto
+CREATE TABLE IF NOT EXISTS input.fator_esgoto (
+    cidade_id     text NOT NULL,
+    cidade_name   text,
+    cobertura_pct double precision NOT NULL,
+    paridade      double precision,
+    PRIMARY KEY (cidade_id, cobertura_pct)
+);
+COMMENT ON TABLE input.fator_esgoto IS
+    'PARIDADE esgoto/agua: tarifa_esgoto = ticket_medio(agua) x paridade. Vale a paridade '
+    'da MAIOR faixa cuja cobertura_pct <= cobertura da cidade no ano (cobertura REALIZADA '
+    'do plano). Cidade com paridade constante: uma unica linha com cobertura_pct = 0.';
+
+-- ---- CTS (opcional: so existe se a unidade tiver Coletor de Tempo Seco) ----
+-- aba do motor: cts-operacional
+CREATE TABLE IF NOT EXISTS input.cts_operacional (
+    cts                             text PRIMARY KEY,
+    preco_por_ligacao               double precision,
+    receita_faturada_media_mensal   double precision,
+    receita_arrecadada_media_mensal double precision,
+    tempo_arrecadacao               integer,
+    tempo_ramp_up                   integer,
+    vazao_contribuicao              double precision,
+    universo_ligacoes               integer,
+    ligacoes_atuais                 integer,
+    ligacoes_novas_obras            integer,
+    universo_economias              integer,
+    economias_atuais                integer,
+    economias_novas_obras           integer,
+    universo_populacao              double precision,
+    populacao_atual                 double precision,
+    populacao_novas_obras           double precision,
+    potencial_crescimento           double precision,
+    universo_ligacoes_industrial    integer,
+    ligacoes_atuais_industrial      integer,
+    receita_faturada_industrial     double precision,
+    receita_arrecadada_industrial   double precision,
+    vazao_contribuicao_industrial   double precision
+);
+
+-- aba do motor: subbacia-cts  (pareamento 1:1)
+CREATE TABLE IF NOT EXISTS input.subbacia_cts (
+    sub_bacia text PRIMARY KEY
+        REFERENCES input.subbacia_operacional(sub_bacia),
+    cts       text NOT NULL
+        REFERENCES input.cts_operacional(cts)
+);
+
+-- aba do motor: componentes-cts-capex
+CREATE TABLE IF NOT EXISTS input.componentes_cts_capex (
+    cts                  text NOT NULL
+        REFERENCES input.cts_operacional(cts),
+    componente           text NOT NULL,
+    quantidade           double precision,
+    unidade              text,
+    preco_unitario       double precision,
+    capex                double precision,
+    opex                 double precision,
+    tempo_predecessoras  integer,
+    tempo_execucao       integer,
+    obra_obrigatoria_ano integer,
+    obra_proibida_ate    integer,
+    wacc                 double precision,
+    PRIMARY KEY (cts, componente)
+);
+
+-- ---- INDICES que o backend/front consultam --------------------------------
+CREATE INDEX IF NOT EXISTS ix_unidade_regional ON input.unidade_regional (regional_id);
+CREATE INDEX IF NOT EXISTS ix_sup_unidade      ON input.regional_superintendencia (unidade_id);
+CREATE INDEX IF NOT EXISTS ix_cidade_sup       ON input.superintendencia_cidade (superintendencia_id);
+CREATE INDEX IF NOT EXISTS ix_sistema_cidade   ON input.cidade_sistema (cidade_id);
+CREATE INDEX IF NOT EXISTS ix_topo_sistema     ON input.sistema_topologia (sistema_id);
+CREATE INDEX IF NOT EXISTS ix_topo_jusante     ON input.sistema_topologia (componente_sistema_id_jusante);
+CREATE INDEX IF NOT EXISTS ix_metas_cidade     ON input.metas_cobertura (cidade_id);
+CREATE INDEX IF NOT EXISTS ix_fator_cidade     ON input.fator_esgoto (cidade_id);
+
+-- ---- CONTROLE -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS controle.run_request (
+    run_id        text PRIMARY KEY,
+    unidade       text,
+    params        jsonb NOT NULL,          -- os parametros da celula PARAMETROS
+    solicitado_por text,
+    solicitado_em timestamptz DEFAULT now()
+);
+COMMENT ON COLUMN controle.run_request.params IS
+    'Chaves aceitas: job_databricks.MAPA_PARAMS + CHAVES_DO_JOB. Chave desconhecida e ERRO '
+    '(nao silencio). Chave AUSENTE usa o default do ler_banco — o job nao inventa default '
+    'proprio. E preciso teto ANUAL: ORCAMENTO no params ou input.orcamento — '
+    'ORCAMENTO_TOTAL sozinho so limita o total da janela, nao o ano.';
+
+CREATE TABLE IF NOT EXISTS controle.run_status (
+    run_id     text PRIMARY KEY REFERENCES controle.run_request(run_id),
+    status     text NOT NULL
+        CHECK (status IN ('PENDENTE','RODANDO','SUCESSO','FALHOU_QUALIDADE','ERRO')),
+    erro       text,
+    atualizado_em timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS controle.run_diagnostico (
+    run_id    text,
+    checagem  text,
+    nivel     text,
+    ok        boolean,
+    detalhe   text,
+    gravado_em timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_diag_run ON controle.run_diagnostico(run_id);

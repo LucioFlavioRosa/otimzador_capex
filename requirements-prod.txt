@@ -1,0 +1,14 @@
+# Execução do pipeline em produção (Databricks)
+ortools>=9.7
+pandas>=1.5
+openpyxl>=3.1
+matplotlib>=3.5           # dashboard_otimizador_v2, que persistencia.set_engine exige
+                          # (o job importa; no DBR vem pré-instalado, num venv limpo não)
+# Postgres
+sqlalchemy>=1.4
+psycopg2-binary>=2.9
+# opcionais
+azure-servicebus>=7.11    # notificação ao concluir
+pyarrow>=12               # cópia parquet no blob (ADLS)
+# testes / CI
+pytest>=7.0

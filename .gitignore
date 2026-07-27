@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# saidas de execucao (o pipeline grava resultado; nada disso e fonte)
+resultados/
+resultados_otimizador/
+*.parquet
+/ddl_resultado_local.sql
+
+# bancos de entrada reais — NAO versionar dado de cliente.
+# As fixtures de tests/fixtures/ sao a excecao: pequenas, sinteticas e a suite depende delas.
+/*.xlsx
+banco_dados_*.xlsx
+
+# credenciais — nunca. A conexao vem de Databricks Secret Scope.
+.env
+*.pgpass
+secrets.*
+
+# IDE / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
