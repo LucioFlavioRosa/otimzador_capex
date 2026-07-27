@@ -237,7 +237,7 @@ def passo_carga(conn, rel, s_in, fixture):
                     total += len(d)
     except Exception as e:
         rel.falha("carrega o cadastro", f"{type(e).__name__}: {e}")
-        print("\n      → PK ou FK violada costuma significar cadastro duplicado ou orfao.")
+        print("\n      -> PK ou FK violada costuma significar cadastro duplicado ou orfao.")
         print("        As consultas de diagnostico estao no fim de ddl_input_migracao_01.sql.\n")
         return False
 

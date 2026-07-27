@@ -11,6 +11,7 @@ quem chega agora.
 | 4 | [Execução dos testes](04-testes-executar.md) | todos os devs | como rodar, o que os skips significam, CI, golden |
 | 5 | [O que os testes cobrem](05-testes-cobertura.md) | quem vai mudar código | o que já está protegido, o portão de qualidade, e as lacunas |
 | 6 | [Dicionário do schema de saída](06-dicionario-resultado.md) | backend + front | as 258 colunas de `public.otim_*`, coluna a coluna, e as consultas de validação |
+| 7 | [Rodar tudo sem Databricks](07-rodar-local.md) | **quem está começando** | do clone à execução do job de produção na própria máquina, em três níveis |
 
 ## Trilhas por papel
 
@@ -22,6 +23,9 @@ colunas que você vai ler) → 3 §3.6–3.7.
 **Quem vai manter o otimizador** → **1 inteiro** → 5 → 4 → 2 §2.2 (o cadastro).
 
 **Quem só precisa rodar os testes** → 4.
+
+**Quem ainda não tem acesso ao Databricks** → **7 inteiro**, depois 1 e 5. O nível A do
+documento 7 roda em minutos e só precisa de Python.
 
 ## Documentos irmãos, fora desta pasta
 

@@ -4,6 +4,9 @@ Pasta **completa e autossuficiente** para rodar o pipeline em produção: **ler 
 otimizar → testar (portão de qualidade) → salvar no Postgres**. Tudo flat (os módulos se
 importam como irmãos).
 
+> 🚀 **Sem acesso ao Databricks?** [`docs/07-rodar-local.md`](docs/07-rodar-local.md) leva do
+> clone à execução do job inteiro na sua máquina. Comece por `python experimentos_local.py`.
+>
 > 📚 **Documentação detalhada em [`docs/`](docs/README.md)** — visão geral · integração com o
 > backend · colocar em produção · execução dos testes · o que os testes cobrem. Este README é
 > o resumo de uma página; comece por `docs/README.md` se você chegou agora.
