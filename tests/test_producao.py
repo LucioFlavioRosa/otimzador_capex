@@ -445,3 +445,50 @@ def test_rodar_repassa_blob_e_criar_schema_false(job_dublado):
     assert kw["blob"] == "abfss://x/y/"
     assert kw["criar_schema"] is False, "DDL nao pode rodar no caminho quente"
     assert kw["status_controle"] == ("run_teste", "controle")
+
+
+def test_rodar_falhou_qualidade_nao_publica(job_dublado, monkeypatch):
+    """O ramo que o portao existe para acionar: grava o diagnostico, marca
+    FALHOU_QUALIDADE e NAO publica. Ate agora so o caminho de sucesso era testado — e e
+    justamente aqui que status, diagnostico e limpeza se combinam."""
+    espiao, vistos = job_dublado
+    monkeypatch.setattr(Q, "checar",
+                        lambda cen, res, tabs: (False, [{"check": "x", "nivel": "critico",
+                                                         "ok": False, "detalhe": "d"}],
+                                                "QUALIDADE FALHOU — 1 de 1"))
+    r = J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
+
+    assert r["status"] == "FALHOU_QUALIDADE"
+    assert espiao.publicado is None, "reprovou no portao e mesmo assim publicou"
+    assert espiao.status == ["RODANDO", "FALHOU_QUALIDADE"]
+    assert espiao.diagnostico, "o relatorio tem de ficar gravado para o operador ler"
+    import os
+    assert not os.path.exists(vistos["snapshot_para"]), "o temporario vazou neste ramo"
+
+
+def test_rodar_erro_marca_status_e_relevanta(job_dublado, monkeypatch):
+    """Falha tecnica depois da carga: marca ERRO, re-levanta (para o run aparecer como
+    falho no Databricks) e ainda assim limpa o temporario."""
+    espiao, vistos = job_dublado
+
+    def explode(*a, **k):
+        raise RuntimeError("falha simulada no portao")
+
+    monkeypatch.setattr(Q, "checar", explode)
+    with pytest.raises(RuntimeError, match="falha simulada"):
+        J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
+
+    assert espiao.publicado is None
+    assert espiao.status == ["RODANDO", "ERRO"]
+    import os
+    assert not os.path.exists(vistos["snapshot_para"]), "o temporario vazou no ramo de erro"
+
+
+def test_rodar_usa_nome_unico_para_o_snapshot(job_dublado):
+    """Duas execucoes do mesmo run_id nao podem disputar o mesmo arquivo temporario."""
+    espiao, vistos = job_dublado
+    J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
+    primeiro = vistos["snapshot_para"]
+    J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
+    assert vistos["snapshot_para"] != primeiro, "nome do snapshot nao e unico por execucao"
+    assert "run_teste" in vistos["snapshot_para"], "o run_id some do nome e atrapalha o diagnostico"

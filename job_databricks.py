@@ -173,7 +173,13 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
         # 3) carga do input (Postgres -> Cenario). O xlsx materializado e MANTIDO: ele e a
         #    copia congelada do cadastro desta rodada, e vira as tabelas snapshot__* no
         #    passo 5. Apagado no `finally` la embaixo.
-        snap = os.path.join(tempfile.gettempdir(), f"snapshot_{run_id}.xlsx")
+        #    Nome UNICO (mkstemp), nao `snapshot_{run_id}.xlsx`: duas execucoes do mesmo
+        #    run_id em paralelo — retry disparado enquanto a primeira ainda roda —
+        #    sobrescreveriam ou apagariam o arquivo uma da outra. O `run_id` entra so como
+        #    prefixo legivel, sanitizado porque vai virar nome de arquivo.
+        _rid = "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(run_id))[:40]
+        _fd, snap = tempfile.mkstemp(prefix=f"snapshot_{_rid}_", suffix=".xlsx")
+        os.close(_fd)                    # so o NOME interessa; quem escreve e o adaptador
         cen = carregar_postgres(pg_url, schema=schema_input, snapshot_para=snap, **kw)
 
         # 3b) teto de CAPEX tem de existir — depois da carga, para o fallback pela tabela

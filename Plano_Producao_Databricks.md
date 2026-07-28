@@ -1,7 +1,7 @@
 > ⚠️ **DOCUMENTO HISTÓRICO — superado pela implementação.**
 > Este é o plano original, mantido como registro das decisões de arquitetura (§1 e §4 seguem
 > válidos e valem a leitura). Os números e estados **estão desatualizados**: fala em "26
-> testes" (são 79), "13 tabelas `run_*`" (são 14), Fase 4 como "esqueleto" com TODOs que já
+> testes" (são 82), "13 tabelas `run_*`" (são 14), Fase 4 como "esqueleto" com TODOs que já
 > foram feitos, e caminhos `producao/*` que não existem — o pacote é flat.
 >
 > Para o estado atual: [`docs/README.md`](docs/README.md) (documentação por assunto) e

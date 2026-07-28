@@ -6,7 +6,7 @@ Revisão de código do pacote de produção (Databricks + Azure Postgres), no es
 
 Alvo: Python 3.10+, Databricks Runtime.
 
-> **Estado: TUDO APLICADO** (D1–D9), na ordem sugerida. Suíte: **66 passed, 13 skipped**
+> **Estado: TUDO APLICADO** (D1–D9), na ordem sugerida. Suíte: **69 passed, 13 skipped**
 > (baseline era 30 passed, 1 failed). Dois achados novos — **C6** e **A6** — só apareceram
 > ao *executar* o portão, e estão marcados como tal. O achado **C4** foi corrigido no
 > diagnóstico depois do teste: a consequência não era publicação silenciosa, e sim um
@@ -950,7 +950,7 @@ valor golden foi alterado.
 ### Verificações executadas
 
 ```
-pytest -q tests/                       ->  66 passed, 13 skipped
+pytest -q tests/                       ->  69 passed, 13 skipped
 ```
 
 Portão sobre uma materialização real (banco de teste CTS + CP-SAT, `run_id` fixo):

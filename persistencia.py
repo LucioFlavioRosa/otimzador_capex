@@ -69,7 +69,10 @@ def novo_run_id(prefixo="run"):
 
 def _md5(caminho):
     try:
-        return _hl.md5(open(caminho, "rb").read()).hexdigest()
+        # `with`: este arquivo costuma ser o snapshot temporario que o job apaga logo
+        # depois — handle pendurado impede a remocao no Windows.
+        with open(caminho, "rb") as f:
+            return _hl.md5(f.read()).hexdigest()
     except Exception:
         return None
 

@@ -54,6 +54,10 @@ ABAS_OPCIONAIS = {"subbacia-cts", "cts-operacional", "componentes-cts-capex",
 # de fora desta lista podem vir vazias — o motor tolera (`fator_esgoto` sem faixas cai em
 # paridade 1.0, `otimizador_capex_v62.py:365`; `metas_cobertura` vazio = rodada so por VPL;
 # `ete_capex` vazio = sistema sem ETE) — mas a carga avisa em voz alta.
+# `regional-operacional` fica aqui de PROPOSITO, mesmo o motor tolerando: sem ela o
+# `ano_base` cai no default 2026 (`num(..., 2026)`, v62:1121) e TODAS as datas do plano
+# saem deslocadas, sem erro nenhum. Tolerar seria trocar uma falha visivel por um
+# resultado silenciosamente errado.
 ABAS_ESTRUTURAIS = {"unidade-regional", "regional-superintendencia", "superintendencia-cidade",
                     "cidade-sistema", "sistema-topologia", "cidade-operacional",
                     "subbacia-operacional", "componentes-subbacias-capex",
@@ -163,8 +167,11 @@ def _roundtrip_xlsx(origem_xlsx, destino_xlsx):
     """Simula o Postgres: le cada aba do xlsx em DataFrame e regrava — mesmo caminho
     que `snapshot_input_para_xlsx`, mas a fonte e um xlsx em vez do banco."""
     import pandas as pd
-    xls = pd.ExcelFile(origem_xlsx)
-    with pd.ExcelWriter(destino_xlsx, engine="openpyxl") as xw:
-        for aba in xls.sheet_names:
-            pd.read_excel(origem_xlsx, sheet_name=aba).to_excel(xw, sheet_name=aba[:31], index=False)
+    # `with` no ExcelFile: handle aberto trava o arquivo no Windows e quem tentar apaga-lo
+    # depois leva PermissionError — foi o que aconteceu com o snapshot temporario do job.
+    with pd.ExcelFile(origem_xlsx) as xls:
+        abas = list(xls.sheet_names)
+        with pd.ExcelWriter(destino_xlsx, engine="openpyxl") as xw:
+            for aba in abas:
+                xls.parse(aba).to_excel(xw, sheet_name=aba[:31], index=False)
     return destino_xlsx

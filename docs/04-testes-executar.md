@@ -28,8 +28,8 @@ Se você não vai rodar o pipeline, o mínimo para a suíte é:
 
 ```
 $ python -m pytest tests/
-79 collected
-66 passed, 13 skipped in 2.9s
+82 collected
+69 passed, 13 skipped in 3.1s
 ```
 
 | Arquivo | Testes |
@@ -39,7 +39,7 @@ $ python -m pytest tests/
 | `test_classe.py` | 7 |
 | `test_derivadas.py` | 2 |
 | `test_regressao_golden.py` | 4 |
-| `test_producao.py` | 36 |
+| `test_producao.py` | 39 |
 | `test_publicacao_postgres.py` | 12 |
 
 **Os 13 skips são esperados**, não são falha:
@@ -49,8 +49,8 @@ $ python -m pytest tests/
 | 12 | `test_publicacao_postgres.py` | precisa de um Postgres | definir `OTIMIZADOR_PG_TESTE` (§4.4) |
 | 1 | `test_nucleo.py::test_separabilidade_por_cidade_e_exata` | importa `testes_otimizador`, a suíte legada que **não acompanha** este pacote | copiar `testes_otimizador.py` para a pasta |
 
-**Sem OR-Tools o total sobe para 21 skips** — nenhuma falha. São 5 testes marcados `solver`
-(um deles, a separabilidade, já está entre os 13 acima) mais os 4 de `rodar()` fim a fim,
+**Sem OR-Tools o total sobe para 24 skips** — nenhuma falha. São 5 testes marcados `solver`
+(um deles, a separabilidade, já está entre os 13 acima) mais os 7 de `rodar()` fim a fim,
 que chamam o CP-SAT de verdade e por isso pulam junto. Sem matplotlib, mais 1.
 
 > Se algum desses testes **falhar** em vez de pular num ambiente sem OR-Tools, é bug —
@@ -156,7 +156,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - run: pip install -r requirements-prod.txt
-      - run: pytest -q tests/          # 66 passed, 13 skipped
+      - run: pytest -q tests/          # 69 passed, 13 skipped
 
   com-postgres:
     runs-on: ubuntu-latest

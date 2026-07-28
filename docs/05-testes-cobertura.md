@@ -3,7 +3,7 @@
 Público: quem vai mudar o código e precisa saber **o que já está protegido** e **o que não
 está**. Também serve como especificação executável: cada teste é uma regra de negócio escrita.
 
-Panorama: **79 testes em 7 arquivos**, mais o **portão de qualidade por rodada** (14 checagens
+Panorama: **82 testes em 7 arquivos**, mais o **portão de qualidade por rodada** (14 checagens
 críticas), que é um mecanismo diferente e complementar — ver §5.8.
 
 ---
@@ -76,7 +76,7 @@ invariante de otimalidade `VPL(solver) ≥ VPL(build-all)`.
 Este é o teste que decide se uma refatoração foi neutra. Atualizar o golden é uma decisão
 consciente — ver `04-testes-executar.md` §4.6.
 
-## 5.6 `test_producao.py` — a camada de produção (36 testes)
+## 5.6 `test_producao.py` — a camada de produção (39 testes)
 
 Nenhum precisa de banco. Cobrem os bugs mais caros encontrados na revisão do pacote.
 
@@ -105,7 +105,7 @@ Nenhum precisa de banco. Cobrem os bugs mais caros encontrados na revisão do pa
 - **Reprova tabela obrigatória vazia**, `run_id` divergente entre tabelas, duplicata de PK e
   CAPEX sem teto (`teto_capex = INF`).
 
-### `rodar()` fim a fim, com o Postgres dublado (4 testes)
+### `rodar()` fim a fim, com o Postgres dublado (7 testes)
 
 Nenhum teste chamava a orquestração. Foi assim que passaram despercebidos um `import os`
 ausente — `NameError` só em execução, que `py_compile` não pega — e um `arquivo_fonte=`
@@ -113,6 +113,11 @@ esquecido na materialização. Agora `rodar()` é exercitado com `publicacao` e
 `carregar_postgres` substituídos por dublês: ordem dos passos, o que é passado a quem,
 presença das `snapshot__*` no que vai ser publicado, `criar_schema=False`, e a remoção do
 xlsx temporário no fim.
+
+Os três ramos estão cobertos — **SUCESSO**, **FALHOU_QUALIDADE** (grava diagnóstico e
+**não** publica) e **ERRO** (marca status, re-levanta, e ainda assim limpa o temporário) —
+mais um que garante que o nome do arquivo de snapshot é único por execução, para dois
+retries do mesmo `run_id` não disputarem o mesmo caminho.
 
 ### Propagação do `run_id` (1 teste)
 
@@ -202,7 +207,7 @@ Honestidade sobre as lacunas, para ninguém confiar demais na suíte verde:
 | Lacuna | Risco | Mitigação hoje |
 |---|---|---|
 | `carregar_postgres.py` sem teste de integração | o adaptador de leitura nunca leu de um Postgres real | `_roundtrip_xlsx` prova que a materialização em xlsx não altera o Cenário; a leitura em si é `SELECT *` |
-| `job_databricks.rodar()` fim-a-fim | a orquestração inteira nunca rodou em teste | as partes estão testadas isoladamente |
+| `job_databricks.rodar()` contra um Postgres real | os 7 testes de orquestração usam dublês; a conversa com o banco continua sem prova | `smoke_test_postgres.py` cobre isso quando houver banco |
 | `leitor_v2.py` | contrato de leitura sem teste automatizado | é o módulo que prova o contrato — merece teste |
 | `dashboard_otimizador_v2.py` | explicabilidade sem teste | usado só pela materialização |
 | `publicar_blob` / Service Bus / webhook | notificação e blob sem teste | são idempotentes/reexecutáveis por natureza |

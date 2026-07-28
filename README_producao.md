@@ -104,7 +104,7 @@ rodar(run_id=dbutils.widgets.get("run_id"),
 
 ```bash
 pip install -r requirements-prod.txt
-pytest tests/            # 79 testes; os de solver pulam se faltar ortools
+pytest tests/            # 82 testes; os de solver pulam se faltar ortools
 ```
 
 `tests/test_producao.py` cobre a camada de produção (tradução de `run_request.params`, portão
