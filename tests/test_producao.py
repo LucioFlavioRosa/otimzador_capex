@@ -378,6 +378,11 @@ class _EspiaoPublicacao:
 def job_dublado(monkeypatch):
     """Prepara `rodar()` para rodar sem banco: run_request e carga vêm da fixture."""
     pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
+    # O banco e a publicacao sao dublados, mas o SOLVER nao — `rodar()` chama
+    # `CP.resolver_por_sistema` de verdade, que e o ponto: exercitar a orquestracao
+    # inteira. Sem OR-Tools estes 4 testes FALHARIAM em vez de pular, e o CI offline
+    # nasceria vermelho — contra a regra da propria doc, "nenhum skip em vermelho".
+    pytest.importorskip("ortools", reason="rodar() usa o CP-SAT; OR-Tools ausente")
     from _helpers import BANK_CTS, silent
     M = engine()
 

@@ -49,9 +49,13 @@ $ python -m pytest tests/
 | 12 | `test_publicacao_postgres.py` | precisa de um Postgres | definir `OTIMIZADOR_PG_TESTE` (§4.4) |
 | 1 | `test_nucleo.py::test_separabilidade_por_cidade_e_exata` | importa `testes_otimizador`, a suíte legada que **não acompanha** este pacote | copiar `testes_otimizador.py` para a pasta |
 
-São 5 testes marcados `solver`; um deles (a separabilidade) já está entre os 13 skips acima,
-então sem OR-Tools instalado o total sobe para 17 — mais 4 do que o normal. Sem matplotlib,
-mais 1.
+**Sem OR-Tools o total sobe para 21 skips** — nenhuma falha. São 5 testes marcados `solver`
+(um deles, a separabilidade, já está entre os 13 acima) mais os 4 de `rodar()` fim a fim,
+que chamam o CP-SAT de verdade e por isso pulam junto. Sem matplotlib, mais 1.
+
+> Se algum desses testes **falhar** em vez de pular num ambiente sem OR-Tools, é bug —
+> foi o que aconteceu quando os testes de `rodar()` foram escritos sem o
+> `importorskip("ortools")` na fixture, e faria o CI offline nascer vermelho.
 **Nenhum skip é aceitável em vermelho:** se um teste *falhar* em vez de pular, é bug.
 
 ---
