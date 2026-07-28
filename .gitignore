@@ -28,6 +28,11 @@ banco_dados_*.xlsx
 *.pgpass
 secrets.*
 
+# artefatos de revisao/empacotamento temporario (o conteudo ja esta versionado)
+_to_delete/
+*.tgz
+*.tar.gz
+
 # IDE / SO
 .vscode/
 .idea/
