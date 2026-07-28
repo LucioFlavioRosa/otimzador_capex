@@ -647,15 +647,17 @@ def snapshot_banco(caminho, run_id):
     """Copia cada aba do banco de entrada como tabela 'snapshot__<aba>'."""
     out = {}
     try:
-        xl = pd.ExcelFile(caminho)
+        # `with`: sem fechar, o handle fica aberto e no Windows o arquivo fica TRAVADO —
+        # quem tenta apagar o xlsx temporario depois leva PermissionError (subclasse de
+        # OSError) e o arquivo vaza em silencio.
+        with pd.ExcelFile(caminho) as xl:
+            for aba in xl.sheet_names:
+                nome = "snapshot__" + str(aba).strip().lower().replace(" ", "_").replace("-", "_")
+                df = xl.parse(aba)
+                df.insert(0, "run_id", run_id)
+                out[nome] = df
     except Exception as e:
         print(f"  [aviso] nao consegui abrir o banco para snapshot: {e}")
-        return out
-    for aba in xl.sheet_names:
-        nome = "snapshot__" + str(aba).strip().lower().replace(" ", "_").replace("-", "_")
-        df = xl.parse(aba)
-        df.insert(0, "run_id", run_id)
-        out[nome] = df
     return out
 
 

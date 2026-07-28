@@ -3,7 +3,7 @@
 Público: quem vai mudar o código e precisa saber **o que já está protegido** e **o que não
 está**. Também serve como especificação executável: cada teste é uma regra de negócio escrita.
 
-Panorama: **74 testes em 7 arquivos**, mais o **portão de qualidade por rodada** (14 checagens
+Panorama: **79 testes em 7 arquivos**, mais o **portão de qualidade por rodada** (14 checagens
 críticas), que é um mecanismo diferente e complementar — ver §5.8.
 
 ---
@@ -76,7 +76,7 @@ invariante de otimalidade `VPL(solver) ≥ VPL(build-all)`.
 Este é o teste que decide se uma refatoração foi neutra. Atualizar o golden é uma decisão
 consciente — ver `04-testes-executar.md` §4.6.
 
-## 5.6 `test_producao.py` — a camada de produção (31 testes)
+## 5.6 `test_producao.py` — a camada de produção (36 testes)
 
 Nenhum precisa de banco. Cobrem os bugs mais caros encontrados na revisão do pacote.
 
@@ -104,6 +104,15 @@ Nenhum precisa de banco. Cobrem os bugs mais caros encontrados na revisão do pa
 - **Reprova `SEM SOLUCAO`.**
 - **Reprova tabela obrigatória vazia**, `run_id` divergente entre tabelas, duplicata de PK e
   CAPEX sem teto (`teto_capex = INF`).
+
+### `rodar()` fim a fim, com o Postgres dublado (4 testes)
+
+Nenhum teste chamava a orquestração. Foi assim que passaram despercebidos um `import os`
+ausente — `NameError` só em execução, que `py_compile` não pega — e um `arquivo_fonte=`
+esquecido na materialização. Agora `rodar()` é exercitado com `publicacao` e
+`carregar_postgres` substituídos por dublês: ordem dos passos, o que é passado a quem,
+presença das `snapshot__*` no que vai ser publicado, `criar_schema=False`, e a remoção do
+xlsx temporário no fim.
 
 ### Propagação do `run_id` (1 teste)
 

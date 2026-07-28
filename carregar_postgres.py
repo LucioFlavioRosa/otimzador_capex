@@ -50,6 +50,15 @@ ABAS_INPUT = {
 ABAS_OPCIONAIS = {"subbacia-cts", "cts-operacional", "componentes-cts-capex",
                   "orcamento", "sistema-operacional"}
 
+# Abas cujo conteudo VAZIO e sempre erro: sem elas o Cenario nao faz sentido. As que ficam
+# de fora desta lista podem vir vazias — o motor tolera (`fator_esgoto` sem faixas cai em
+# paridade 1.0, `otimizador_capex_v62.py:365`; `metas_cobertura` vazio = rodada so por VPL;
+# `ete_capex` vazio = sistema sem ETE) — mas a carga avisa em voz alta.
+ABAS_ESTRUTURAIS = {"unidade-regional", "regional-superintendencia", "superintendencia-cidade",
+                    "cidade-sistema", "sistema-topologia", "cidade-operacional",
+                    "subbacia-operacional", "componentes-subbacias-capex",
+                    "regional-operacional"}
+
 
 def _engine_sqlalchemy(pg_url):
     from sqlalchemy import create_engine
@@ -86,16 +95,20 @@ def snapshot_input_para_xlsx(pg_url, destino_xlsx, schema="input"):
                     raise RuntimeError(
                         f"falha ao ler {schema}.{tabela} (aba '{aba}'): {e}") from e
                 if df is None or len(df) == 0:
-                    # tabela VAZIA nao e o mesmo que ausente. Um `metas_cobertura` que
-                    # exista mas esteja vazio (carga do front interrompida, TRUNCATE
-                    # indevido) produziria um Cenario sem metas, que resolve, passa no
-                    # portao e publica como SUCESSO. So as opcionais podem vir vazias.
-                    if aba in ABAS_OPCIONAIS:
-                        continue
-                    raise RuntimeError(
-                        f"{schema}.{tabela} (aba '{aba}') existe mas esta VAZIA. "
-                        f"Se a rodada realmente nao deve ter esses dados, inclua a aba em "
-                        f"carregar_postgres.ABAS_OPCIONAIS.")
+                    # Tabela VAZIA nao e o mesmo que ausente, e as consequencias diferem:
+                    #  - estrutural vazia = Cenario incoerente, quase sempre carga
+                    #    interrompida -> erro;
+                    #  - as demais o motor tolera (fator_esgoto vazio cai em paridade 1.0;
+                    #    metas_cobertura vazio = rodada so por VPL) -> AVISA, alto, porque
+                    #    "sem metas" tambem e o sintoma de um TRUNCATE indevido.
+                    if aba in ABAS_ESTRUTURAIS:
+                        raise RuntimeError(
+                            f"{schema}.{tabela} (aba '{aba}') existe mas esta VAZIA. Sem ela "
+                            f"o Cenario fica incoerente — verifique a carga do cadastro.")
+                    if aba not in ABAS_OPCIONAIS:
+                        print(f"  [aviso] {schema}.{tabela} existe mas esta VAZIA: a rodada "
+                              f"seguira sem esses dados. Se nao era esperado, confira a carga.")
+                    continue
                 # o Excel limita o nome da aba a 31 chars e o motor le pelo nome EXATO:
                 # um nome mais longo seria truncado e a aba sumiria em silencio.
                 if len(aba) > 31:

@@ -127,8 +127,13 @@ def _rodada(banco, params, max_time_s, workers, build_all, verboso=False):
     cen = _carregar(banco, verboso=verboso, **params)
     res, seg = _resolver(cen, max_time_s, workers, build_all, verboso)
     with _silencioso(verboso):
+        # `arquivo_fonte`: sem ele o snapshot__* nao e gerado (o rotulo `basename` nao
+        # existe no diretorio corrente), e `--salvar` gravaria as run_* sem a copia
+        # congelada do banco de entrada — justamente o que a mensagem promete.
+        caminho = banco if os.path.isabs(banco) else os.path.join(ROOT, banco)
         tabs = P.materializar(cen, res, run_id="experimento_local",
-                              banco=os.path.basename(banco), params=params)
+                              banco=os.path.basename(banco), arquivo_fonte=caminho,
+                              params=params)
     return cen, res, tabs, _kpis(res, tabs, seg)
 
 
@@ -159,7 +164,7 @@ def _portao(cen, res, tabs, build_all=False):
     _, _, Q = _modulos()
     if build_all:
         print("  NOTA: com --build-all a checagem 'Status do solver' reprova por construcao"
-              " — nao houve solver. As outras 11 valem normalmente.\n")
+              " — nao houve solver. As outras 13 valem normalmente.\n")
     ok, rel, resumo = Q.checar(cen, res, tabs)
     Q.imprimir(rel, resumo)
     if build_all:

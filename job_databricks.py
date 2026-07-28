@@ -26,6 +26,8 @@ que precisa de segredo — e ele fica na configuracao do cluster, nao aqui.)
 """
 from __future__ import annotations
 import json
+import os
+import tempfile
 import traceback
 
 
@@ -156,6 +158,7 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
     import qualidade as Q
 
     D.set_engine(M); P.set_engine(M, D)
+    snap = None                          # o `finally` referencia isto mesmo se falhar antes
 
     try:
         # 1) le a run_request ANTES de marcar RODANDO: controle.run_status tem FK para
@@ -186,8 +189,12 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
         #    public.otim_*, e e a chave do DELETE idempotente de publicar_postgres. Sem
         #    passar aqui, `materializar` gera um id novo e cada retry PUBLICA DE NOVO em
         #    vez de substituir.
+        #    `banco` e o ROTULO da origem (vai para run_meta.banco_arquivo);
+        #    `arquivo_fonte` e de onde saem as tabelas snapshot__* e o banco_md5 — sem ele
+        #    a copia congelada do cadastro nao existe e a auditoria fica sem base.
         tabs = P.materializar(cen, res, run_id=run_id,
-                              banco=f"postgres://{schema_input}", params=p)
+                              banco=f"postgres://{schema_input}", arquivo_fonte=snap,
+                              params=p)
 
         # 6) PORTAO DE QUALIDADE — antes de publicar
         ok, relatorio, resumo = Q.checar(cen, res, tabs)
@@ -231,8 +238,10 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
         try:
             if snap and os.path.exists(snap):
                 os.unlink(snap)
-        except OSError:
-            pass
+        except OSError as e:
+            # nao pode derrubar a rodada, mas tambem nao pode sumir: um handle aberto
+            # (ExcelFile sem close) deixa o arquivo travado e o temp do driver enche.
+            print(f"AVISO: nao consegui apagar o snapshot temporario {snap}: {e}")
 
 
 # NOTA para revisao:

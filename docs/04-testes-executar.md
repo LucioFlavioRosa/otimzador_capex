@@ -28,8 +28,8 @@ Se você não vai rodar o pipeline, o mínimo para a suíte é:
 
 ```
 $ python -m pytest tests/
-74 collected
-61 passed, 13 skipped in 2.6s
+79 collected
+66 passed, 13 skipped in 2.9s
 ```
 
 | Arquivo | Testes |
@@ -39,7 +39,7 @@ $ python -m pytest tests/
 | `test_classe.py` | 7 |
 | `test_derivadas.py` | 2 |
 | `test_regressao_golden.py` | 4 |
-| `test_producao.py` | 31 |
+| `test_producao.py` | 36 |
 | `test_publicacao_postgres.py` | 12 |
 
 **Os 13 skips são esperados**, não são falha:
@@ -152,7 +152,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - run: pip install -r requirements-prod.txt
-      - run: pytest -q tests/          # 61 passed, 13 skipped
+      - run: pytest -q tests/          # 66 passed, 13 skipped
 
   com-postgres:
     runs-on: ubuntu-latest

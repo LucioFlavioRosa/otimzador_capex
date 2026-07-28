@@ -60,7 +60,7 @@ Front/Backend ──lê──▶ Postgres `run_*`  (o contrato que o leitor_v2 j
 | Peça | Situação |
 |---|---|
 | Motor (`otimizador_capex_v62.py`) + solver (`cpsat63`) | **existe** — puro, testado |
-| Materialização em tabelas (`persistencia.py`) | **existe** — 13 tabelas `run_*` + snapshots |
+| Materialização em tabelas (`persistencia.py`) | **existe** — 14 tabelas `run_*` + snapshots |
 | DDL das tabelas de RESULTADO (`publicacao.ddl_postgres`) | **existe** |
 | Escrita idempotente por `run_id` + `marcar_status` (`publicacao.publicar`) | **existe** — FK cascade |
 | Suíte de regressão (26 testes pytest) | **existe** — porta de CI |

@@ -28,7 +28,7 @@ python -m pip install -r requirements-prod.txt
 python -m pytest -q tests/
 ```
 
-Esperado: **61 passed, 13 skipped**. Os 13 skips são normais — 12 precisam de Postgres
+Esperado: **66 passed, 13 skipped**. Os 13 skips são normais — 12 precisam de Postgres
 (nível B) e 1 precisa de uma suíte legada que não acompanha o pacote. Detalhes em
 [`04-testes-executar.md`](04-testes-executar.md).
 
@@ -173,7 +173,8 @@ Este é **o** comando. Ele faz o pipeline inteiro e confere cada etapa:
 4. roda `job_databricks.rodar()` fim a fim;
 5. confere no banco: VPL do cabeçalho igual à soma por sub-bacia, CAPEX reconciliando entre
    ano/mês/cidade, frações de rateio somando 1, teto respeitado;
-6. **roda a mesma `run_id` de novo** e compara as contagens das 13 tabelas.
+6. **roda a mesma `run_id` de novo** e compara as contagens das 13 tabelas de detalhe
+   (as 14 publicadas menos o cabeçalho, conferido à parte).
 
 O passo 6 é o que só o banco prova: republicar tem de **apagar e regravar**, não acumular.
 

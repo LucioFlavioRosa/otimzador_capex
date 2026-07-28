@@ -209,11 +209,34 @@ def test_portao_reprova_cobertura_negativa():
     assert any("Cobertura" in r["check"] and not r["ok"] for r in rel)
 
 
-def test_portao_roda_14_checagens_criticas():
-    """Trava o numero: se uma checagem voltar a procurar coluna inexistente, ela some do
-    relatorio em silencio e este teste acusa."""
+CHECAGENS_CRITICAS = {
+    "Materializacao: tabelas obrigatorias presentes",
+    "run_id: unico em todas as tabelas",
+    "Chaves: sem duplicatas nas PKs",
+    "Status do solver",
+    "VPL: soma por sub-bacia = VPL do plano",
+    "CAPEX: run_ano = run_meta",
+    "CAPEX: run_mes = run_ano",
+    "CAPEX: run_cidade_ano = run_ano",
+    "Rateio: fracoes somam 1 por obra",
+    "Orcamento: teto anual respeitado",
+    "Orcamento: teto definido em todos os anos",
+    "Integridade: colunas-chave sem NaN",
+    "Metas: deficit nao-negativo",
+    "Cobertura: valores nao-negativos",
+}
+
+
+def test_portao_roda_todas_as_checagens_criticas():
+    """Trava os NOMES, nao um numero: checagem nova e bem-vinda (o teste diz qual apareceu),
+    mas checagem que SOME em silencio — porque voltou a procurar coluna inexistente — e
+    acusada com o nome dela. Foi assim que 'deficit' e 'cobertura' passaram despercebidas."""
     _, rel, _ = Q.checar(None, RES_OK, _tabs_sadias())
-    assert len([r for r in rel if r["nivel"] == "critico"]) == 14
+    executadas = {r["check"] for r in rel if r["nivel"] == "critico"}
+    assert not (CHECAGENS_CRITICAS - executadas), \
+        f"checagens que deixaram de rodar: {sorted(CHECAGENS_CRITICAS - executadas)}"
+    novas = executadas - CHECAGENS_CRITICAS
+    assert not novas, f"checagens novas — confirme e adicione a CHECAGENS_CRITICAS: {sorted(novas)}"
 
 
 # ------------------------------------------------- notificacao pos-commit
@@ -290,17 +313,130 @@ def test_tabela_obrigatoria_vazia_e_erro(monkeypatch, tmp_path):
     import pandas as pd
     import carregar_postgres as C
 
+    def _com_vazia(nome_tabela):
+        def read_sql_falso(sql, con, **kw):
+            vazia = nome_tabela in str(sql)
+            return pd.DataFrame() if vazia else pd.DataFrame([{"a": 1}])
+        return read_sql_falso
+
+    monkeypatch.setattr(C, "_engine_sqlalchemy", lambda url: _EngineFalsa())
+    monkeypatch.setattr(pd, "read_sql", _com_vazia("subbacia_operacional"))
+    with pytest.raises(RuntimeError, match="VAZIA"):
+        C.snapshot_input_para_xlsx("postgresql://x", str(tmp_path / "s.xlsx"))
+
+
+def test_tabela_tolerada_vazia_apenas_avisa(monkeypatch, tmp_path, capsys):
+    """`fator_esgoto` vazio e legitimo: o motor cai em paridade 1.0 quando a cidade nao tem
+    faixas (otimizador_capex_v62.py:365). Barrar aqui impediria uma rodada valida — mas
+    passar em silencio esconderia uma carga interrompida. Entao: avisa."""
+    import pandas as pd
+    import carregar_postgres as C
+
     def read_sql_falso(sql, con, **kw):
-        # tudo com uma linha, menos metas_cobertura, que volta vazia
-        vazia = "metas_cobertura" in str(sql)
+        vazia = "fator_esgoto" in str(sql)
         return pd.DataFrame() if vazia else pd.DataFrame([{"a": 1}])
 
     monkeypatch.setattr(C, "_engine_sqlalchemy", lambda url: _EngineFalsa())
     monkeypatch.setattr(pd, "read_sql", read_sql_falso)
-    with pytest.raises(RuntimeError, match="VAZIA"):
-        C.snapshot_input_para_xlsx("postgresql://x", str(tmp_path / "s.xlsx"))
+    C.snapshot_input_para_xlsx("postgresql://x", str(tmp_path / "s.xlsx"))
+    assert "VAZIA" in capsys.readouterr().out
 
 
 class _EngineFalsa:
     def dispose(self):
         pass
+
+
+# =============================================================================
+#  rodar() FIM A FIM, com o Postgres substituido por dublês
+#
+#  Nenhum teste chamava `rodar()`. Foi assim que passaram despercebidos um `import os`
+#  ausente (NameError so em execucao — py_compile nao pega) e um `arquivo_fonte=` esquecido.
+#  Estes testes exercitam a ORQUESTRACAO: a ordem dos passos, o que e passado a quem, e o
+#  ciclo de vida do snapshot. O banco inteiro e dublado.
+# =============================================================================
+class _EspiaoPublicacao:
+    """Substitui `publicacao` no job e grava o que foi chamado."""
+
+    def __init__(self):
+        self.status = []
+        self.publicado = None
+        self.diagnostico = None
+
+    def marcar_status_controle(self, pg, run_id, status, erro=None, schema="controle"):
+        self.status.append(status)
+
+    def gravar_diagnostico(self, pg, run_id, relatorio, schema="controle"):
+        self.diagnostico = relatorio
+
+    def publicar(self, tabs, **kw):
+        self.publicado = (tabs, kw)
+        return {"run_id": tabs["run_meta"]["run_id"].iloc[0]}
+
+
+@pytest.fixture
+def job_dublado(monkeypatch):
+    """Prepara `rodar()` para rodar sem banco: run_request e carga vêm da fixture."""
+    pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
+    from _helpers import BANK_CTS, silent
+    M = engine()
+
+    espiao = _EspiaoPublicacao()
+    monkeypatch.setattr(J, "_ler_run_request",
+                        lambda pg, rid, schema="controle": {"ORCAMENTO": 50e6,
+                                                            "USUARIO": "teste"})
+
+    vistos = {}
+
+    def carregar_falso(pg_url, schema="input", snapshot_para=None, **params):
+        # o adaptador real materializa o cadastro num xlsx; aqui copiamos a fixture para o
+        # caminho pedido, que e exatamente o contrato de `snapshot_para`
+        vistos["snapshot_para"] = snapshot_para
+        if snapshot_para:
+            import shutil
+            shutil.copy(BANK_CTS, snapshot_para)
+        return silent(M.ler_banco, BANK_CTS, **params)
+
+    monkeypatch.setitem(__import__("sys").modules, "publicacao", espiao)
+    monkeypatch.setattr("carregar_postgres.carregar_postgres", carregar_falso)
+    return espiao, vistos
+
+
+def test_rodar_fim_a_fim_publica_e_marca_status(job_dublado, capsys):
+    espiao, vistos = job_dublado
+    r = J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
+    assert r["status"] == "SUCESSO", r
+    assert espiao.status == ["RODANDO"], "SUCESSO deve entrar junto com a publicacao"
+    assert espiao.publicado is not None
+    assert espiao.diagnostico, "o diagnostico e gravado mesmo quando a rodada passa"
+
+
+def test_rodar_passa_o_snapshot_para_a_materializacao(job_dublado):
+    """O bug que escapou: sem `arquivo_fonte=snap`, a rodada publica sem snapshot__* e a
+    camada de reproducao fica vazia — sem nenhum erro."""
+    espiao, vistos = job_dublado
+    J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
+
+    assert vistos["snapshot_para"], "carregar_postgres tem de receber snapshot_para"
+    tabs, _ = espiao.publicado
+    snaps = [k for k in tabs if k.startswith("snapshot__")]
+    assert len(snaps) >= 10, f"rodada publicada sem copia congelada do cadastro: {snaps}"
+    assert tabs["run_meta"].iloc[0]["banco_md5"], "sem md5 nao da para auditar a origem"
+    # a proveniencia continua sendo o rotulo, nao o arquivo temporario
+    assert tabs["run_meta"].iloc[0]["banco_arquivo"].startswith("postgres://")
+
+
+def test_rodar_apaga_o_snapshot_temporario(job_dublado):
+    import os
+    espiao, vistos = job_dublado
+    J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
+    assert not os.path.exists(vistos["snapshot_para"]), "o xlsx temporario ficou orfao"
+
+
+def test_rodar_repassa_blob_e_criar_schema_false(job_dublado):
+    espiao, _ = job_dublado
+    J.rodar("run_teste", "postgresql://dublê", blob="abfss://x/y/", max_time_s=20)
+    _, kw = espiao.publicado
+    assert kw["blob"] == "abfss://x/y/"
+    assert kw["criar_schema"] is False, "DDL nao pode rodar no caminho quente"
+    assert kw["status_controle"] == ("run_teste", "controle")
