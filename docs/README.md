@@ -40,7 +40,7 @@ documento 7 roda em minutos e só precisa de Python.
 ## Subindo o banco pela primeira vez
 
 ```bash
-python smoke_test_postgres.py --pg "postgresql://..."
+python main.py smoke --pg "postgresql://..."
 ```
 
 Pipeline inteiro contra o Postgres, incluindo a republicação do mesmo `run_id`. Detalhes em
@@ -56,5 +56,5 @@ Pipeline inteiro contra o Postgres, incluindo a republicação do mesmo `run_id`
 3. **Reprocessar o mesmo `run_id` é seguro**: apaga e regrava, numa transação só.
 4. **Chave desconhecida em `params` é erro**; chave ausente usa o default do motor, nunca um
    default do job.
-5. `pytest tests/` → **69 passed, 13 skipped**. Os 13 skips são esperados (12 precisam de
+5. `pytest tests/` → **66 passed, 13 skipped**. Os 13 skips são esperados (12 precisam de
    Postgres, 1 precisa da suíte legada).

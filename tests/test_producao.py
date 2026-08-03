@@ -11,8 +11,8 @@ import pytest
 
 from _helpers import engine
 
-import job_databricks as J
-import qualidade as Q
+from otimizador.aplicacao import job_databricks as J
+from otimizador.dominio import qualidade as Q
 
 
 # --------------------------------------------------------- traducao de parametros
@@ -244,7 +244,7 @@ def test_falha_de_notificacao_nao_derruba_a_publicacao(monkeypatch):
     """A notificacao roda DEPOIS do commit. Se ela levantasse, a excecao subiria ate o
     `except` de rodar(), que marcaria ERRO por cima de um SUCESSO ja gravado — com os dados
     publicados e visiveis. O operador reprocessaria uma rodada intacta."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
 
     def explode(*a, **k):
         raise RuntimeError("fila fora do ar")
@@ -265,8 +265,8 @@ def test_materializar_respeita_o_run_id_da_rodada():
     """Sem `run_id=` a materializacao gera um id novo: controle.* e public.otim_* deixam
     de casar e cada retry publica de novo em vez de substituir."""
     pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
-    import dashboard_otimizador_v2 as D
-    import persistencia as P
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.infraestrutura import persistencia as P
     from _helpers import load_cts, build_all, silent
     M = engine()
     D.set_engine(M); P.set_engine(M, D)
@@ -285,8 +285,8 @@ def test_materializar_gera_snapshot_do_arquivo_fonte():
     o blob receberia as run_* mas nao a copia congelada do cadastro, e "refazer a mesma
     rodada meses depois" deixaria de ser possivel."""
     pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
-    import dashboard_otimizador_v2 as D
-    import persistencia as P
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.infraestrutura import persistencia as P
     from _helpers import BANK_CTS, load_cts, build_all, silent
     M = engine()
     D.set_engine(M); P.set_engine(M, D)
@@ -311,7 +311,7 @@ def test_tabela_obrigatoria_vazia_e_erro(monkeypatch, tmp_path):
     (carga interrompida, TRUNCATE indevido) produziria um Cenario sem metas, que resolve,
     passa no portao e publica SUCESSO."""
     import pandas as pd
-    import carregar_postgres as C
+    from otimizador.infraestrutura import carregar_postgres as C
 
     def _com_vazia(nome_tabela):
         def read_sql_falso(sql, con, **kw):
@@ -330,7 +330,7 @@ def test_tabela_tolerada_vazia_apenas_avisa(monkeypatch, tmp_path, capsys):
     faixas (otimizador_capex_v62.py:365). Barrar aqui impediria uma rodada valida — mas
     passar em silencio esconderia uma carga interrompida. Entao: avisa."""
     import pandas as pd
-    import carregar_postgres as C
+    from otimizador.infraestrutura import carregar_postgres as C
 
     def read_sql_falso(sql, con, **kw):
         vazia = "fator_esgoto" in str(sql)
@@ -378,10 +378,8 @@ class _EspiaoPublicacao:
 def job_dublado(monkeypatch):
     """Prepara `rodar()` para rodar sem banco: run_request e carga vêm da fixture."""
     pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
-    # O banco e a publicacao sao dublados, mas o SOLVER nao — `rodar()` chama
-    # `CP.resolver_por_sistema` de verdade, que e o ponto: exercitar a orquestracao
-    # inteira. Sem OR-Tools estes 4 testes FALHARIAM em vez de pular, e o CI offline
-    # nasceria vermelho — contra a regra da propria doc, "nenhum skip em vermelho".
+    # rodar() chama o solver de verdade (CP.resolver_por_sistema): sem OR-Tools estes 4
+    # testes FALHARIAM em vez de pular — quebrando o invariante "nenhum skip em vermelho".
     pytest.importorskip("ortools", reason="rodar() usa o CP-SAT; OR-Tools ausente")
     from _helpers import BANK_CTS, silent
     M = engine()
@@ -402,8 +400,12 @@ def job_dublado(monkeypatch):
             shutil.copy(BANK_CTS, snapshot_para)
         return silent(M.ler_banco, BANK_CTS, **params)
 
-    monkeypatch.setitem(__import__("sys").modules, "publicacao", espiao)
-    monkeypatch.setattr("carregar_postgres.carregar_postgres", carregar_falso)
+    import sys as _sys
+    import otimizador.infraestrutura as _infra
+    monkeypatch.setattr(_infra, "publicacao", espiao)
+    monkeypatch.setitem(_sys.modules, "otimizador.infraestrutura.publicacao", espiao)
+    monkeypatch.setattr("otimizador.infraestrutura.carregar_postgres.carregar_postgres",
+                        carregar_falso)
     return espiao, vistos
 
 

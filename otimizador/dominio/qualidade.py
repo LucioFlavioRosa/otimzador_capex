@@ -8,11 +8,10 @@ e a suite pytest, que roda no CI antes do deploy — nao aqui.
 
 Depende so de `tabs` (as tabelas materializadas), `res` (saida do otimizador) e,
 opcionalmente, `cen`. NAO abre conexao nem executa SQL — roda offline e e testavel sem
-banco. A unica dependencia externa e a leitura do dicionario `publicacao.CHAVES` (as PKs
-das tabelas publicadas), importado sob demanda dentro de `checar` e protegido por
-try/except: sem ele a checagem de duplicatas e pulada, o resto continua valendo.
+banco. As PKs das tabelas publicadas vem de `dominio.contrato_resultado` — dominio dependendo
+so de dominio.
 
-    from producao.qualidade import checar
+    from otimizador.dominio.qualidade import checar
     ok, relatorio, resumo = checar(cen, res, tabs)
     if not ok:
         # marca FALHOU, grava `relatorio` em run_diagnostico, NAO publica
@@ -76,10 +75,7 @@ def checar(cen, res, tabs, tol: float = TOL):
     # ---- 0c. sem duplicatas nas chaves primarias -------------------------------
     # barra aqui, e nao no INSERT: duplicata vira erro de constraint no meio da
     # transacao, com mensagem que nao diz de onde veio.
-    try:
-        from publicacao import CHAVES as _CHAVES
-    except Exception:                                    # portao roda offline tambem
-        _CHAVES = {}
+    from otimizador.dominio.contrato_resultado import CHAVES as _CHAVES
     dups = []
     for nome, chave in _CHAVES.items():
         df = tabs.get(nome)

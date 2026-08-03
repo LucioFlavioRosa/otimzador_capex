@@ -45,7 +45,7 @@ Toda a leitura e escrita vive em **adaptadores** ao redor:
 
 Consequências práticas — é por isso que vale a pena manter:
 
-1. **A suíte de testes existe.** 69 dos 82 testes rodam sem banco, sem rede e sem credencial,
+1. **A suíte de testes existe.** 66 dos 79 testes rodam sem banco, sem rede e sem credencial,
    em ~2 s (os outros 13 pulam: 12 precisam de Postgres, 1 precisa da suíte legada). Se o
    motor tivesse SQL dentro, nada disso seria testável.
 2. **O caminho Excel continua funcionando.** `ler_banco(<arquivo.xlsx>)` é o caminho de
@@ -73,7 +73,7 @@ Consequências práticas — é por isso que vale a pena manter:
 | **Qualidade** | `qualidade.py` | portão por rodada, antes de publicar | Não |
 | **Orquestração** | `job_databricks.py` | entrypoint fino: amarra tudo e trata erro | via os adaptadores |
 | **Contrato de leitura** | `leitor_v2.py` | reconstrói as telas **só** a partir das tabelas | não importa o motor |
-| **DDL** | `ddl_input.sql`, `ddl_input_migracao_01.sql` | schemas `input` e `controle` | — |
+| **DDL** | `otimizador/infraestrutura/sql/ddl_input.sql`, `otimizador/infraestrutura/sql/ddl_input_migracao_01.sql` | schemas `input` e `controle` | — |
 
 `leitor_v2.py` merece atenção: ele **não importa** o motor, o solver nem o dashboard — só lê
 DataFrames. Se as telas se reconstroem com ele, o contrato de dados está completo e o backend
@@ -223,7 +223,7 @@ cidade no ano**. É endógena — depende do próprio plano.
 
 | Fase | Estado |
 |---|---|
-| 1 — Modelo de dados (`ddl_input.sql`) | pronto, com PKs/FKs/tipos revisados |
+| 1 — Modelo de dados (`otimizador/infraestrutura/sql/ddl_input.sql`) | pronto, com PKs/FKs/tipos revisados |
 | 2 — Adaptador Postgres → Cenário | pronto; usa `.xlsx` temporário |
 | 2b — `ler_banco` aceitando dict de DataFrames | **não feito** — proposital, ver abaixo |
 | 3 — Portão de qualidade | pronto, 14 checagens críticas |

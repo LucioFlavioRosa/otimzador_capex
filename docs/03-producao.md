@@ -57,7 +57,7 @@ databricks secrets put-secret otimizador sb_conn
 ### Banco novo
 
 ```bash
-psql "$PG_URL" -f ddl_input.sql
+psql "$PG_URL" -f otimizador/infraestrutura/sql/ddl_input.sql
 ```
 
 Cria `input` (16 tabelas de cadastro) e `controle` (`run_request`, `run_status`,
@@ -66,7 +66,7 @@ Cria `input` (16 tabelas de cadastro) e `controle` (`run_request`, `run_status`,
 ### Banco que já existe na versão antiga (sem PKs/FKs)
 
 ```bash
-psql "$PG_URL" -f ddl_input_migracao_01.sql
+psql "$PG_URL" -f otimizador/infraestrutura/sql/ddl_input_migracao_01.sql
 ```
 
 Roda em **uma transação**: ou aplica tudo, ou nada. Se algum `ALTER` falhar, quase sempre é
@@ -84,14 +84,14 @@ SELECT c.* FROM input.componentes_subbacias_capex c
 ### Tabelas de resultado (`public.otim_*`)
 
 ```bash
-psql "$PG_URL" -f ddl_resultado.sql
+psql "$PG_URL" -f otimizador/infraestrutura/sql/ddl_resultado.sql
 ```
 
 O arquivo já acompanha o pacote. Ele é **gerado** — reflete exatamente o que a publicação
 escreve — e se precisar regerar (coluna nova na materialização, por exemplo):
 
 ```bash
-python gerar_ddl_resultado.py
+python main.py gerar-ddl
 ```
 
 O gerador materializa cinco cenários das fixtures e fica com o tipo mais específico de cada
@@ -100,19 +100,21 @@ Equivalente inline, se você quiser fazer na mão:
 
 ```python
 import matplotlib; matplotlib.use("Agg")
-import dashboard_otimizador_v2 as D, persistencia as P, publicacao as PUB
-import otimizador_capex_v62 as M
+from otimizador.apresentacao import dashboard_otimizador_v2 as D
+from otimizador.dominio import otimizador_capex_v62 as M
+from otimizador.infraestrutura import persistencia as P, publicacao as PUB
 D.set_engine(M); P.set_engine(M, D)
 
 cen  = M.ler_banco("tests/fixtures/banco_teste_CTS_poc_v2.xlsx", orcamento=1e9)
 plano = {oid: max(0, int(o.inicio_min)) for oid, o in cen.obras.items() if o.eh_aegea()}
 tabs = P.materializar(cen, M.avaliar(cen, plano), run_id="ddl", banco="ddl")
 
-open("ddl_resultado.sql", "w", encoding="utf-8").write(PUB.ddl_postgres(tabs, schema="public"))
+with open("otimizador/infraestrutura/sql/ddl_resultado.sql", "w", encoding="utf-8") as f:
+    f.write(PUB.ddl_postgres(tabs, schema="public"))
 ```
 
 ```bash
-psql "$PG_URL" -f ddl_resultado.sql
+psql "$PG_URL" -f otimizador/infraestrutura/sql/ddl_resultado.sql
 ```
 
 Cria 14 tabelas `otim_*` com PK, **FK para `otim_meta` com `ON DELETE CASCADE`**, índices e as
@@ -153,26 +155,26 @@ ver §3.8.
 Antes de tocar no Databricks, prove o banco:
 
 ```bash
-python smoke_test_postgres.py --pg "$PG_URL" --schemas-reais --manter
+python main.py smoke --pg "$PG_URL" --schemas-reais --manter
 ```
 
 Ele aplica os dois DDL, carrega uma fixture, roda o job fim a fim, confere as reconciliações
 e republica a mesma `run_id` para provar que não duplica. Falha com código 1 e diz onde.
 Se a carga do cadastro falhar por PK ou FK, é dado duplicado ou órfão — as consultas de
-diagnóstico estão no fim de `ddl_input_migracao_01.sql`.
+diagnóstico estão no fim de `otimizador/infraestrutura/sql/ddl_input_migracao_01.sql`.
 
 ---
 
 ## 3.4 Instalar o código no Databricks
 
-Hoje o pacote é **flat**: os módulos se importam como irmãos (`import publicacao`), sem
-namespace de pacote. Duas formas de instalar:
+O código vive no pacote `otimizador/` (camadas DDD; ver `otimizador/__init__.py`), com
+entrada única em `main.py`. Duas formas de instalar:
 
-**(a) Workspace Files / Repos** — copie a pasta e adicione ao `sys.path`:
+**(a) Workspace Files / Repos** — copie a pasta e adicione a RAIZ do projeto ao `sys.path`:
 
 ```python
 import sys; sys.path.append("/Workspace/Repos/otimizador/Otimizador_Producao")
-from job_databricks import rodar
+from otimizador.aplicacao.job_databricks import rodar
 ```
 
 **(b) Wheel** *(Fase 5, ainda não feita)* — empacotar com módulos nomeados
@@ -186,7 +188,7 @@ job. É a forma recomendada para produção de verdade; enquanto não existe, (a
 Notebook de **uma célula**, ou entrypoint do wheel:
 
 ```python
-from job_databricks import rodar
+from otimizador.aplicacao.job_databricks import rodar
 
 resultado = rodar(
     run_id      = dbutils.widgets.get("run_id"),
@@ -307,7 +309,7 @@ Comece por aí.
   sequencial, não concorrência: dois jobs publicando o mesmo `run_id` ao mesmo tempo podem
   deadlock no `DELETE`.
 - **Não coloque credencial em widget.** Widget é visível no histórico do job.
-- **Não edite `ddl_input.sql` sem passar pela migration.** Banco novo e banco existente têm de
+- **Não edite `otimizador/infraestrutura/sql/ddl_input.sql` sem passar pela migration.** Banco novo e banco existente têm de
   convergir para o mesmo esquema.
 
 ---

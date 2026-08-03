@@ -13,7 +13,7 @@ Evolucao "limpa" (Fase 2b, opcional): trocar `ler_banco(path)` por um `ler_banco
 que aceite um dict de DataFrames direto, eliminando o arquivo temporario. Fica para depois
 que o caminho estiver validado — o adaptador abaixo ja entrega valor sem tocar no motor.
 
-    from producao.carregar_postgres import carregar_postgres
+    from otimizador.infraestrutura.carregar_postgres import carregar_postgres
     cen = carregar_postgres(pg_url, schema="input", **params_da_rodada)
 """
 from __future__ import annotations
@@ -54,10 +54,6 @@ ABAS_OPCIONAIS = {"subbacia-cts", "cts-operacional", "componentes-cts-capex",
 # de fora desta lista podem vir vazias — o motor tolera (`fator_esgoto` sem faixas cai em
 # paridade 1.0, `otimizador_capex_v62.py:365`; `metas_cobertura` vazio = rodada so por VPL;
 # `ete_capex` vazio = sistema sem ETE) — mas a carga avisa em voz alta.
-# `regional-operacional` fica aqui de PROPOSITO, mesmo o motor tolerando: sem ela o
-# `ano_base` cai no default 2026 (`num(..., 2026)`, v62:1121) e TODAS as datas do plano
-# saem deslocadas, sem erro nenhum. Tolerar seria trocar uma falha visivel por um
-# resultado silenciosamente errado.
 ABAS_ESTRUTURAIS = {"unidade-regional", "regional-superintendencia", "superintendencia-cidade",
                     "cidade-sistema", "sistema-topologia", "cidade-operacional",
                     "subbacia-operacional", "componentes-subbacias-capex",
@@ -138,7 +134,7 @@ def carregar_postgres(pg_url, schema="input", snapshot_para=None, **params):
     Sem isso a camada de reproducao/auditoria fica vazia: o arquivo era apagado aqui antes
     de qualquer um poder usa-lo. Quem pede e responsavel por apagar depois.
     """
-    import otimizador_capex_v62 as M      # o motor (mesmo do caminho Excel)
+    from otimizador.dominio import otimizador_capex_v62 as M   # o motor (mesmo do caminho Excel)
     if snapshot_para:
         destino, apagar = snapshot_para, False
     else:

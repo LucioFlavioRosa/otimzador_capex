@@ -28,8 +28,8 @@ Se você não vai rodar o pipeline, o mínimo para a suíte é:
 
 ```
 $ python -m pytest tests/
-82 collected
-69 passed, 13 skipped in 3.1s
+79 collected
+66 passed, 13 skipped in 2.9s
 ```
 
 | Arquivo | Testes |
@@ -39,7 +39,7 @@ $ python -m pytest tests/
 | `test_classe.py` | 7 |
 | `test_derivadas.py` | 2 |
 | `test_regressao_golden.py` | 4 |
-| `test_producao.py` | 39 |
+| `test_producao.py` | 36 |
 | `test_publicacao_postgres.py` | 12 |
 
 **Os 13 skips são esperados**, não são falha:
@@ -49,13 +49,9 @@ $ python -m pytest tests/
 | 12 | `test_publicacao_postgres.py` | precisa de um Postgres | definir `OTIMIZADOR_PG_TESTE` (§4.4) |
 | 1 | `test_nucleo.py::test_separabilidade_por_cidade_e_exata` | importa `testes_otimizador`, a suíte legada que **não acompanha** este pacote | copiar `testes_otimizador.py` para a pasta |
 
-**Sem OR-Tools o total sobe para 24 skips** — nenhuma falha. São 5 testes marcados `solver`
-(um deles, a separabilidade, já está entre os 13 acima) mais os 7 de `rodar()` fim a fim,
-que chamam o CP-SAT de verdade e por isso pulam junto. Sem matplotlib, mais 1.
-
-> Se algum desses testes **falhar** em vez de pular num ambiente sem OR-Tools, é bug —
-> foi o que aconteceu quando os testes de `rodar()` foram escritos sem o
-> `importorskip("ortools")` na fixture, e faria o CI offline nascer vermelho.
+São 5 testes marcados `solver`; um deles (a separabilidade) já está entre os 13 skips acima,
+então sem OR-Tools instalado o total sobe para 17 — mais 4 do que o normal. Sem matplotlib,
+mais 1.
 **Nenhum skip é aceitável em vermelho:** se um teste *falhar* em vez de pular, é bug.
 
 ---
@@ -113,7 +109,7 @@ confere as reconciliações **no banco** e **roda a mesma `run_id` de novo** par
 idempotência. É o teste que a suíte não consegue fazer.
 
 ```bash
-python smoke_test_postgres.py --pg "postgresql://postgres:teste@localhost:5433/postgres"
+python main.py smoke --pg "postgresql://postgres:teste@localhost:5433/postgres"
 ```
 
 Por padrão cria `smoke_input` / `smoke_controle` / `smoke_public` e derruba no fim.
@@ -130,7 +126,7 @@ no fim (`DROP SCHEMA ... CASCADE`). Não encostam em `public`, `input` nem `cont
 assim, prefira um banco descartável.
 
 **Detalhe de manutenção:** o DDL de controle usado pelo teste é **extraído do próprio
-`ddl_input.sql`**, trocando só o nome do schema. Se você mudar o DDL — coluna nova, `CHECK`
+`otimizador/infraestrutura/sql/ddl_input.sql`**, trocando só o nome do schema. Se você mudar o DDL — coluna nova, `CHECK`
 novo — o teste passa a exercitar a versão nova sem ninguém precisar editá-lo.
 
 > ⚠️ **Estes 12 testes nunca foram executados.** Foram escritos contra a implementação, mas na
@@ -156,7 +152,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - run: pip install -r requirements-prod.txt
-      - run: pytest -q tests/          # 69 passed, 13 skipped
+      - run: pytest -q tests/          # 66 passed, 13 skipped
 
   com-postgres:
     runs-on: ubuntu-latest

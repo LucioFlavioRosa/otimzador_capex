@@ -1,11 +1,14 @@
 # Otimizador de CAPEX — Pacote de Produção (Databricks + Postgres)
 
 Pasta **completa e autossuficiente** para rodar o pipeline em produção: **ler do Postgres →
-otimizar → testar (portão de qualidade) → salvar no Postgres**. Tudo flat (os módulos se
-importam como irmãos).
+otimizar → testar (portão de qualidade) → salvar no Postgres**. Organizada em camadas
+(DDD): entrada única em `main.py`, código no pacote `otimizador/` —
+`dominio/` (motor puro + portão) · `aplicacao/` (orquestração) · `infraestrutura/`
+(Postgres, materialização, publicação, DDLs) · `apresentacao/` (contrato de leitura,
+explicabilidade). O mapa de cada camada está em `otimizador/__init__.py`.
 
 > 🚀 **Sem acesso ao Databricks?** [`docs/07-rodar-local.md`](docs/07-rodar-local.md) leva do
-> clone à execução do job inteiro na sua máquina. Comece por `python experimentos_local.py`.
+> clone à execução do job inteiro na sua máquina. Comece por `python main.py experimento`.
 >
 > 📚 **Documentação detalhada em [`docs/`](docs/README.md)** — visão geral · integração com o
 > backend · colocar em produção · execução dos testes · o que os testes cobrem. Este README é
@@ -24,8 +27,8 @@ importam como irmãos).
 | **Adaptador (Fase 2)** | `carregar_postgres.py` | Postgres (input) → **Cenário** (reusa o motor) |
 | **Qualidade (Fase 3)** | `qualidade.py` | portão por rodada, antes de publicar |
 | **Job (Fase 4)** | `job_databricks.py` | orquestração fim-a-fim |
-| **DDL (Fase 1)** | `ddl_input.sql` | tabelas de input + controle |
-| **DDL (resultado)** | `ddl_resultado.sql` | `public.otim_*` — gerado por `gerar_ddl_resultado.py` |
+| **DDL (Fase 1)** | `otimizador/infraestrutura/sql/ddl_input.sql` | tabelas de input + controle |
+| **DDL (resultado)** | `otimizador/infraestrutura/sql/ddl_resultado.sql` | `public.otim_*` — gerado por `gerar_ddl_resultado.py` |
 | **Docs** | `Plano_Producao_Databricks.md` | arquitetura e fases (para revisão) |
 
 ## Ordem do fluxo (uma rodada)
@@ -51,10 +54,10 @@ job_databricks.rodar(run_id, pg_url, service_bus)
    dois consumidores — SQLAlchemy (`carregar_postgres`) e `psycopg2.connect` (`publicacao`) —
    e o `postgresql+psycopg2://` do SQLAlchemy é rejeitado pelo psycopg2.
 2. **Schemas/tabelas** no Postgres, nesta ordem:
-   - `ddl_input.sql` — cria `input.*` (cadastro) e `controle.*` (run_request/status/diagnostico).
-     Banco que já existe na versão antiga (sem PKs/FKs): rode `ddl_input_migracao_01.sql`.
-   - `ddl_resultado.sql` — cria `public.otim_*` (14 tabelas + 3 views). Já acompanha o pacote;
-     regere com `python gerar_ddl_resultado.py` se a materialização mudar. Aplique como
+   - `otimizador/infraestrutura/sql/ddl_input.sql` — cria `input.*` (cadastro) e `controle.*` (run_request/status/diagnostico).
+     Banco que já existe na versão antiga (sem PKs/FKs): rode `otimizador/infraestrutura/sql/ddl_input_migracao_01.sql`.
+   - `otimizador/infraestrutura/sql/ddl_resultado.sql` — cria `public.otim_*` (14 tabelas + 3 views). Já acompanha o pacote;
+     regere com `python main.py gerar-ddl` se a materialização mudar. Aplique como
      **migration**: o job publica com `criar_schema=False`, DDL não roda no caminho quente.
 3. **Permissões:** front escreve `input`; backend escreve `controle.run_request`; o job escreve
    `public.otim_*` e `controle.run_status/diagnostico`; o front lê `public`.
@@ -81,7 +84,7 @@ job_databricks.rodar(run_id, pg_url, service_bus)
 No Databricks, o entrypoint (notebook de 1 célula ou wheel):
 
 ```python
-from job_databricks import rodar
+from otimizador.aplicacao.job_databricks import rodar
 rodar(run_id=dbutils.widgets.get("run_id"),
       pg_url=dbutils.secrets.get("otimizador","pg_url"),
       service_bus=dbutils.secrets.get("otimizador","sb_conn"))
@@ -104,7 +107,7 @@ rodar(run_id=dbutils.widgets.get("run_id"),
 
 ```bash
 pip install -r requirements-prod.txt
-pytest tests/            # 82 testes; os de solver pulam se faltar ortools
+pytest tests/            # 79 testes; os de solver pulam se faltar ortools
 ```
 
 `tests/test_producao.py` cobre a camada de produção (tradução de `run_request.params`, portão
@@ -116,7 +119,7 @@ compara o mapa de parâmetros com `inspect.signature(ler_banco)`.
 
 ```bash
 docker run --rm -d -p 5433:5432 -e POSTGRES_PASSWORD=teste --name pg-otim postgres:16
-python smoke_test_postgres.py --pg "postgresql://postgres:teste@localhost:5433/postgres"
+python main.py smoke --pg "postgresql://postgres:teste@localhost:5433/postgres"
 ```
 
 DDL → carga do cadastro → `rodar()` → reconciliações no banco → **republica a mesma `run_id`**
@@ -137,5 +140,5 @@ docker rm -f pg-otim
 ```
 
 Os testes criam os schemas `otim_teste_pub` e `otim_teste_ctrl` e os derrubam no fim — não
-encostam em `public`, `input` nem `controle`. O DDL de controle sai do próprio `ddl_input.sql`
+encostam em `public`, `input` nem `controle`. O DDL de controle sai do próprio `otimizador/infraestrutura/sql/ddl_input.sql`
 (só trocando o schema), então mudança no DDL é exercitada sem editar o teste.
