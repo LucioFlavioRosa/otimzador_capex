@@ -26,8 +26,9 @@ direta, indireta, CAPEX rateado e OPEX.
 
 ## 1.2 O princípio de arquitetura (a decisão que sustenta todo o resto)
 
-> **O motor é puro. Zero I/O.** `otimizador_capex_v62.py` e `otimizador_capex_cpsat63.py`
-> não abrem arquivo, não falam SQL, não fazem rede. Só transformam objetos em memória.
+> **O motor é puro. Zero I/O.** `otimizador/dominio/otimizador_capex_v62.py` e
+> `otimizador/dominio/otimizador_capex_cpsat63.py` não abrem arquivo, não falam SQL, não fazem
+> rede. Só transformam objetos em memória.
 
 Toda a leitura e escrita vive em **adaptadores** ao redor:
 
@@ -45,7 +46,7 @@ Toda a leitura e escrita vive em **adaptadores** ao redor:
 
 Consequências práticas — é por isso que vale a pena manter:
 
-1. **A suíte de testes existe.** 66 dos 79 testes rodam sem banco, sem rede e sem credencial,
+1. **A suíte de testes existe.** 69 dos 82 testes rodam sem banco, sem rede e sem credencial,
    em ~2 s (os outros 13 pulam: 12 precisam de Postgres, 1 precisa da suíte legada). Se o
    motor tivesse SQL dentro, nada disso seria testável.
 2. **O caminho Excel continua funcionando.** `ler_banco(<arquivo.xlsx>)` é o caminho de
@@ -56,24 +57,34 @@ Consequências práticas — é por isso que vale a pena manter:
    sem o `.xlsx` temporário) muda um adaptador, não o motor.
 
 **Regra para o time:** um `import psycopg2`, um `open()` ou um `requests` dentro de
-`otimizador_capex_*.py` é um bug de arquitetura, mesmo que funcione.
+`otimizador/dominio/` é um bug de arquitetura, mesmo que funcione. Vale para o pacote inteiro
+do domínio, não só para os dois arquivos do motor.
 
 ---
 
 ## 1.3 Mapa dos módulos
 
+O código vive no pacote `otimizador/`, dividido em quatro camadas (DDD). A **regra de
+dependência** é de fora para dentro: `apresentacao`, `infraestrutura` e `aplicacao` importam de
+`dominio`; **`dominio` não importa de ninguém**. É a versão estrutural da regra do §1.2 — o
+motor não tem como fazer I/O porque não tem como enxergar quem faz. O mapa curto também está em
+`otimizador/__init__.py`, e a entrada única é o `main.py` na raiz.
+
 | Camada | Arquivo | Papel | Pode ter I/O? |
 |---|---|---|---|
-| **Motor** | `otimizador_capex_v62.py` | modelo econômico, `ler_banco`, `avaliar`, VPL por sub-bacia | **Não** (exceto o `openpyxl` do próprio `ler_banco`) |
-| **Solver** | `otimizador_capex_cpsat63.py` | OR-Tools CP-SAT, geração de colunas por cidade | **Não** |
-| **Apoio** | `dashboard_otimizador_v2.py` | explicabilidade usada pela persistência | matplotlib |
-| **Materialização** | `persistencia.py` | `cen + res` → 14 tabelas `run_*` | escreve parquet/Delta |
-| **Publicação** | `publicacao.py` | DDL de resultado, escrita transacional, status, diagnóstico, notificação | **Sim** — é o dono da escrita |
-| **Leitura (input)** | `carregar_postgres.py` | Postgres `input` → `Cenário` | **Sim** — é o dono da leitura |
-| **Qualidade** | `qualidade.py` | portão por rodada, antes de publicar | Não |
-| **Orquestração** | `job_databricks.py` | entrypoint fino: amarra tudo e trata erro | via os adaptadores |
-| **Contrato de leitura** | `leitor_v2.py` | reconstrói as telas **só** a partir das tabelas | não importa o motor |
-| **DDL** | `otimizador/infraestrutura/sql/ddl_input.sql`, `otimizador/infraestrutura/sql/ddl_input_migracao_01.sql` | schemas `input` e `controle` | — |
+| **domínio** · motor | `otimizador/dominio/otimizador_capex_v62.py` | modelo econômico, `ler_banco`, `avaliar`, VPL por sub-bacia | **Não** (exceto o `openpyxl` do próprio `ler_banco`) |
+| **domínio** · solver | `otimizador/dominio/otimizador_capex_cpsat63.py` | OR-Tools CP-SAT, geração de colunas por cidade | **Não** |
+| **domínio** · qualidade | `otimizador/dominio/qualidade.py` | portão por rodada, antes de publicar | Não |
+| **domínio** · contrato | `otimizador/dominio/contrato_resultado.py` | as 14 tabelas publicadas, suas PKs e os índices — linguagem comum entre portão e publicação | Não |
+| **aplicação** | `otimizador/aplicacao/job_databricks.py` | entrypoint fino: amarra tudo e trata erro | via os adaptadores |
+| **aplicação** | `otimizador/aplicacao/experimentos_local.py` | rodadas locais de análise (`main.py experimento`) | lê fixture, escreve CSV |
+| **infraestrutura** · materialização | `otimizador/infraestrutura/persistencia.py` | `cen + res` → 14 tabelas `run_*` | escreve parquet/Delta |
+| **infraestrutura** · publicação | `otimizador/infraestrutura/publicacao.py` | DDL de resultado, escrita transacional, status, diagnóstico, notificação | **Sim** — é o dono da escrita |
+| **infraestrutura** · leitura | `otimizador/infraestrutura/carregar_postgres.py` | Postgres `input` → `Cenário` | **Sim** — é o dono da leitura |
+| **infraestrutura** · DDL | `otimizador/infraestrutura/sql/ddl_input.sql`, `.../ddl_input_migracao_01.sql`, `.../ddl_resultado.sql` | schemas `input`, `controle` e `public` | — |
+| **apresentação** | `otimizador/apresentacao/leitor_v2.py` | reconstrói as telas **só** a partir das tabelas | não importa o motor |
+| **apresentação** | `otimizador/apresentacao/dashboard_otimizador_v2.py` | explicabilidade usada pela persistência | matplotlib |
+| (fora do pacote) | `scripts/smoke_test_postgres.py`, `scripts/gerar_ddl_resultado.py` | ferramentas de operação, expostas por `main.py smoke` / `gerar-ddl` | **Sim** |
 
 `leitor_v2.py` merece atenção: ele **não importa** o motor, o solver nem o dashboard — só lê
 DataFrames. Se as telas se reconstroem com ele, o contrato de dados está completo e o backend
@@ -210,7 +221,8 @@ cidade no ano**. É endógena — depende do próprio plano.
 
 ## 1.9 As quatro regras que não podem ser quebradas
 
-1. **Motor puro** — nenhum I/O em `otimizador_capex_v62.py` / `otimizador_capex_cpsat63.py`.
+1. **Motor puro** — nenhum I/O em `otimizador/dominio/`, e o domínio não importa das outras
+   camadas.
 2. **Suíte verde** — `pytest tests/` antes e depois de qualquer mudança. Não alterar a
    semântica dos testes nem os valores golden para "fazer passar".
 3. **Caminho Excel preservado** — `ler_banco(path)` continua funcionando; é ele que garante
@@ -228,7 +240,8 @@ cidade no ano**. É endógena — depende do próprio plano.
 | 2b — `ler_banco` aceitando dict de DataFrames | **não feito** — proposital, ver abaixo |
 | 3 — Portão de qualidade | pronto, 14 checagens críticas |
 | 4 — Orquestração do job | pronto |
-| 5 — Wheel + CI | **a fazer** |
+| 4b — Reorganização em camadas (DDD) + entrada única `main.py` | pronto (merge `1126b85`, 2026-08-03) |
+| 5 — Wheel + CI | **a fazer** — o pacote já está no formato que o wheel espera |
 
 **Por que a Fase 2b não foi feita:** o `.xlsx` temporário tem custo real (exige `openpyxl` no
 cluster, escreve no disco local do driver, perde tipagem no caminho Postgres→pandas→Excel), mas

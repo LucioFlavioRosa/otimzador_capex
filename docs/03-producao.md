@@ -177,9 +177,11 @@ import sys; sys.path.append("/Workspace/Repos/otimizador/Otimizador_Producao")
 from otimizador.aplicacao.job_databricks import rodar
 ```
 
-**(b) Wheel** *(Fase 5, ainda não feita)* — empacotar com módulos nomeados
-(`engine`/`dados`/`qualidade`/`persistencia`/`publicacao`/`job`) e instalar como library do
-job. É a forma recomendada para produção de verdade; enquanto não existe, (a) funciona.
+**(b) Wheel** *(Fase 5, ainda não feita)* — empacotar o pacote `otimizador/` como wheel e
+instalá-lo como library do job. A reorganização em camadas já deixou o código no formato que o
+wheel espera (um pacote com `__init__.py` em cada camada); o que falta é o `pyproject.toml`, o
+build e a publicação. É a forma recomendada para produção de verdade; enquanto não existe, (a)
+funciona.
 
 ---
 

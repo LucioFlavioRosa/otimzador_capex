@@ -28,7 +28,7 @@ python -m pip install -r requirements-prod.txt
 python -m pytest -q tests/
 ```
 
-Esperado: **66 passed, 13 skipped**. Os 13 skips são normais — 12 precisam de Postgres
+Esperado: **69 passed, 13 skipped**. Os 13 skips são normais — 12 precisam de Postgres
 (nível B) e 1 precisa de uma suíte legada que não acompanha o pacote. Detalhes em
 [`04-testes-executar.md`](04-testes-executar.md).
 
@@ -262,7 +262,7 @@ rodar(run_id=dbutils.widgets.get("run_id"),
 
 | Sintoma | Causa | Solução |
 |---|---|---|
-| `ModuleNotFoundError: otimizador_capex_v62` | rodou de fora da pasta | rode da pasta com o `pytest.ini` |
+| `ModuleNotFoundError: No module named 'otimizador'` | rodou de fora da raiz do projeto | rode da pasta com o `main.py` e o `pytest.ini` |
 | `ModuleNotFoundError: matplotlib` | dependência de `dashboard_otimizador_v2` | está no requirements; `pip install matplotlib` |
 | Testes de solver pulando | `ortools` ausente | `pip install ortools` |
 | `UnicodeEncodeError` no console | terminal do Windows em cp1252 | `chcp 65001` ou use o Windows Terminal |
