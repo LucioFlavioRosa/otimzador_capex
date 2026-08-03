@@ -14,7 +14,7 @@ Interface identica a do MILP: resolver_cpsat(cen, ...) e resolver_cpsat_por_regi
 Rode no Colab:  pip install ortools
 """
 import math
-import otimizador_capex_v62 as M
+from otimizador.dominio import otimizador_capex_v62 as M   # unica linha alterada na reorganizacao
 def _orck(cen):   # v26: sem financiamento -> sempre o CAPEX cheio entra na restricao de orcamento
     return "capex_ano"
 import copy as _copy

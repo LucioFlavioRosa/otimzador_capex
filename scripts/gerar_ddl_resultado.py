@@ -1,6 +1,6 @@
 """Gera `ddl_resultado.sql` — o DDL das tabelas public.otim_* (o que o job publica).
 
-    python gerar_ddl_resultado.py
+    python main.py gerar-ddl
 
 Por que existe um script em vez de uma linha de codigo:
 
@@ -27,15 +27,15 @@ import sys
 import matplotlib
 matplotlib.use("Agg")                    # o dashboard importa pyplot; sem backend grafico
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # raiz do repo
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import pandas as pd                                             # noqa: E402
-import dashboard_otimizador_v2 as D                             # noqa: E402
-import otimizador_capex_v62 as M                                # noqa: E402
-import persistencia as P                                        # noqa: E402
-import publicacao as PUB                                        # noqa: E402
+from otimizador.apresentacao import dashboard_otimizador_v2 as D   # noqa: E402
+from otimizador.dominio import otimizador_capex_v62 as M            # noqa: E402
+from otimizador.infraestrutura import persistencia as P             # noqa: E402
+from otimizador.infraestrutura import publicacao as PUB             # noqa: E402
 
 FIXTURES = [
     ("tests/fixtures/banco_teste_CTS_poc_v2.xlsx", dict(usar_cts=True)),
@@ -48,7 +48,7 @@ FIXTURES = [
 CABECALHO = """-- ============================================================================
 -- DDL — RESULTADO (public.otim_*)  |  Postgres/Azure
 --
--- GERADO por `python gerar_ddl_resultado.py`. Reflete exatamente o que
+-- GERADO por `python main.py gerar-ddl`. Reflete exatamente o que
 -- `publicacao.publicar_postgres` escreve. NAO edite a mao: um esquema divergente do
 -- gerado faz o INSERT falhar com erro obscuro, ou aceita numero em coluna TEXT e quebra
 -- ORDER BY/SUM no front.
@@ -104,7 +104,7 @@ def main():
     ddl = PUB.ddl_postgres(tabs, schema="public")
     # o gerador carimba data/hora no topo; isso nao versiona bem (diff a cada execucao)
     corpo = "\n".join(l for l in ddl.splitlines() if not l.startswith("-- DDL do otimizador"))
-    destino = os.path.join(ROOT, "ddl_resultado.sql")
+    destino = os.path.join(ROOT, "otimizador", "infraestrutura", "sql", "ddl_resultado.sql")
     with open(destino, "w", encoding="utf-8") as f:
         f.write(CABECALHO + corpo.lstrip("\n") + "\n")
 

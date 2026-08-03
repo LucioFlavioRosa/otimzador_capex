@@ -15,7 +15,7 @@ Postgres vem de um Databricks Secret Scope (nunca hardcoded).
 
 Uso no Databricks (notebook de 1 celula OU wheel entrypoint):
 
-    from job_databricks import rodar
+    from otimizador.aplicacao.job_databricks import rodar
     rodar(run_id=dbutils.widgets.get("run_id"),
           pg_url=dbutils.secrets.get("otimizador","pg_url"),
           blob=dbutils.widgets.get("blob_uri"),                   # ADLS p/ os snapshots
@@ -149,13 +149,13 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
     `max_time_s`/`workers` sao o default do job; o run_request pode sobrescrever por rodada
     (MAX_TIME_S / WORKERS). `webhook` notifica o backend por HTTP, alem do Service Bus.
     """
-    import otimizador_capex_v62 as M
-    import otimizador_capex_cpsat63 as CP
-    import dashboard_otimizador_v2 as D
-    import persistencia as P
-    import publicacao as PUB
-    from carregar_postgres import carregar_postgres
-    import qualidade as Q
+    from otimizador.dominio import otimizador_capex_v62 as M
+    from otimizador.dominio import otimizador_capex_cpsat63 as CP
+    from otimizador.dominio import qualidade as Q
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.infraestrutura import persistencia as P
+    from otimizador.infraestrutura import publicacao as PUB
+    from otimizador.infraestrutura.carregar_postgres import carregar_postgres
 
     D.set_engine(M); P.set_engine(M, D)
     snap = None                          # o `finally` referencia isto mesmo se falhar antes

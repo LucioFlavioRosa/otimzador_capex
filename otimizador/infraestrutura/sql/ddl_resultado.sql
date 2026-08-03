@@ -1,7 +1,7 @@
 -- ============================================================================
 -- DDL — RESULTADO (public.otim_*)  |  Postgres/Azure
 --
--- GERADO por `python gerar_ddl_resultado.py`. Reflete exatamente o que
+-- GERADO por `python main.py gerar-ddl`. Reflete exatamente o que
 -- `publicacao.publicar_postgres` escreve. NAO edite a mao: um esquema divergente do
 -- gerado faz o INSERT falhar com erro obscuro, ou aceita numero em coluna TEXT e quebra
 -- ORDER BY/SUM no front.

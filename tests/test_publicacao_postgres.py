@@ -46,7 +46,8 @@ def _ddl_controle(schema):
     atualizar o teste.
     """
     from _helpers import ROOT
-    with open(os.path.join(ROOT, "ddl_input.sql"), encoding="utf-8") as f:
+    with open(os.path.join(ROOT, "otimizador", "infraestrutura", "sql",
+                           "ddl_input.sql"), encoding="utf-8") as f:
         sql = f.read()
     i = sql.index("-- ---- CONTROLE")
     corpo = sql[i:].replace("controle.", f"{schema}.")
@@ -59,8 +60,8 @@ def _ddl_controle(schema):
 def tabs_base():
     """Uma materializacao real (build-all sobre o banco de teste CTS — sem solver, rapida)."""
     pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
-    import dashboard_otimizador_v2 as D
-    import persistencia as P
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.infraestrutura import persistencia as P
     from _helpers import engine, load_cts, build_all, silent
     M = engine()
     D.set_engine(M); P.set_engine(M, D)
@@ -71,7 +72,7 @@ def tabs_base():
 @pytest.fixture(scope="module", autouse=True)
 def esquemas(tabs_base):
     """Cria os dois schemas do teste (DDL de resultado + DDL de controle) e derruba no fim."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     conn = _conn()
     try:
         with conn:
@@ -142,7 +143,7 @@ TABELAS_DETALHE = ["otim_obra", "otim_subbacia", "otim_ano", "otim_cidade_ano"]
 def test_republicar_o_mesmo_run_id_nao_duplica(tabs_base):
     """O contrato do README: 'reprocessar o mesmo run_id e seguro'. Era falso enquanto o
     job nao passava run_id= para materializar (cada retry publicava um conjunto NOVO)."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     PUB.publicar_postgres(tabs_base, PG, schema=SCHEMA_PUB, criar=False, verbose=False)
     antes = {t: contar(t, "rodada_A") for t in TABELAS_DETALHE}
     assert contar("otim_meta", "rodada_A") == 1
@@ -159,7 +160,7 @@ def test_republicar_o_mesmo_run_id_nao_duplica(tabs_base):
 def test_republicar_substitui_os_detalhes_da_rodada_anterior(tabs_base):
     """Republicar com menos obras tem de APAGAR as antigas (DELETE + ON DELETE CASCADE),
     nao apenas somar. Se a FK cascade nao existir no banco, este teste falha."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     PUB.publicar_postgres(tabs_base, PG, schema=SCHEMA_PUB, criar=False, verbose=False)
     n_completo = contar("otim_obra", "rodada_A")
     assert n_completo >= 2
@@ -174,7 +175,7 @@ def test_republicar_substitui_os_detalhes_da_rodada_anterior(tabs_base):
 
 def test_republicar_nao_afeta_as_outras_rodadas(tabs_base):
     """O DELETE e por run_id: o historico das outras rodadas nao pode se mexer."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     a, b = tabs_base, com_run_id(tabs_base, "rodada_B")
     PUB.publicar_postgres(a, PG, schema=SCHEMA_PUB, criar=False, verbose=False)
     PUB.publicar_postgres(b, PG, schema=SCHEMA_PUB, criar=False, verbose=False)
@@ -190,7 +191,7 @@ def test_republicar_nao_afeta_as_outras_rodadas(tabs_base):
 def test_falha_no_meio_da_publicacao_nao_grava_nada(tabs_base):
     """`run_meta` e `run_obra` entram antes de `run_ano`. Com uma coluna inexistente em
     run_ano, o INSERT estoura no meio — e o que ja entrou tem de sumir no rollback."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     quebrado = dict(tabs_base)
     quebrado["run_ano"] = tabs_base["run_ano"].assign(coluna_que_nao_existe=1)
 
@@ -205,7 +206,7 @@ def test_publicacao_e_status_entram_no_mesmo_commit(tabs_base):
     """A propriedade que o job depende (D5b): com a conexao vinda de fora, `publicar_postgres`
     NAO commita nem fecha — quem manda e o chamador. Se algo falhar depois de publicar, o
     SUCESSO e os dados voltam JUNTOS, e o estado observavel nunca mente."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     criar_run_request("rodada_A")
     conn = _conn()
     try:
@@ -225,7 +226,7 @@ def test_publicacao_e_status_entram_no_mesmo_commit(tabs_base):
 def test_publicar_com_status_controle_commita_os_dois_juntos(tabs_base):
     """O caminho que o job usa: `publicar(status_controle=(run_id, schema))` grava as run_*
     e o SUCESSO na mesma transacao, sem o job precisar abrir conexao na mao."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     criar_run_request("rodada_A")
     PUB.publicar(tabs_base, pg=PG, schema=SCHEMA_PUB, criar_schema=False,
                  status_controle=("rodada_A", SCHEMA_CTRL), verbose=False)
@@ -243,7 +244,7 @@ def test_publicar_com_status_controle_commita_os_dois_juntos(tabs_base):
 
 def test_publicar_com_status_controle_desfaz_os_dois_juntos(tabs_base):
     """Se a publicacao falhar, o SUCESSO nao pode ficar gravado sozinho."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     criar_run_request("rodada_A")
     quebrado = dict(tabs_base)
     quebrado["run_ano"] = tabs_base["run_ano"].assign(coluna_que_nao_existe=1)
@@ -259,7 +260,7 @@ def test_publicar_com_status_controle_desfaz_os_dois_juntos(tabs_base):
 def test_conexao_de_fora_nao_e_fechada(tabs_base):
     """publicar_postgres fechava a conexao do chamador no finally — o que impedia compor
     publicacao e status na mesma transacao."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     conn = _conn()
     try:
         with conn:
@@ -275,7 +276,7 @@ def test_conexao_de_fora_nao_e_fechada(tabs_base):
 
 # ----------------------------------------------------------------- CONTROLE
 def test_marcar_status_controle_faz_upsert():
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     criar_run_request("rodada_A")
     for st in ("RODANDO", "SUCESSO"):
         PUB.marcar_status_controle(PG, "rodada_A", st, schema=SCHEMA_CTRL)
@@ -293,7 +294,7 @@ def test_marcar_status_controle_faz_upsert():
 
 def test_status_fora_do_dominio_e_rejeitado():
     """CHECK do ddl_input.sql: um status escrito errado nao pode entrar em silencio."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     criar_run_request("rodada_A")
     with pytest.raises(Exception):
         PUB.marcar_status_controle(PG, "rodada_A", "CONCLUIDO", schema=SCHEMA_CTRL)
@@ -302,7 +303,7 @@ def test_status_fora_do_dominio_e_rejeitado():
 
 def test_gravar_diagnostico_e_idempotente():
     """Reprocessar a rodada nao pode acumular relatorios de qualidade."""
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     rel = [{"check": "Status do solver", "nivel": "critico", "ok": True, "detalhe": "OTIMO"},
            {"check": "Plano nao-vazio", "nivel": "aviso", "ok": True, "detalhe": "28 obras"}]
     for _ in range(3):
@@ -312,7 +313,7 @@ def test_gravar_diagnostico_e_idempotente():
 
 
 def test_diagnostico_de_outra_rodada_sobrevive():
-    import publicacao as PUB
+    from otimizador.infraestrutura import publicacao as PUB
     rel = [{"check": "x", "nivel": "critico", "ok": False, "detalhe": "d"}]
     PUB.gravar_diagnostico(PG, "rodada_A", rel, schema=SCHEMA_CTRL)
     PUB.gravar_diagnostico(PG, "rodada_B", rel, schema=SCHEMA_CTRL)

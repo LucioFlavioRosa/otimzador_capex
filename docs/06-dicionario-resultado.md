@@ -3,7 +3,7 @@
 Público: backend e front, que leem estas tabelas; e quem for validar uma rodada no banco.
 
 258 colunas em 14 tabelas + 3 views. O DDL correspondente está em
-[`../ddl_resultado.sql`](../ddl_resultado.sql) e é **gerado**, não escrito à mão — ver §6.10.
+[`ddl_resultado.sql`](../otimizador/infraestrutura/sql/ddl_resultado.sql) e é **gerado**, não escrito à mão — ver §6.10.
 
 **Toda tabela tem `run_id`**, e toda tabela de detalhe tem FK para `otim_meta` com
 `ON DELETE CASCADE`. Filtrar por `run_id` é obrigatório em qualquer consulta: o schema guarda
@@ -246,7 +246,7 @@ saudável**. Não tem chave natural (é um log de violações + reparos), mas te
 
 ## 6.10 O DDL é gerado — e por quê importa
 
-`ddl_resultado.sql` sai de `python gerar_ddl_resultado.py`, que chama
+`otimizador/infraestrutura/sql/ddl_resultado.sql` sai de `python main.py gerar-ddl`, que chama
 `publicacao.ddl_postgres(tabs)`. **Não edite o `.sql` à mão:** um esquema divergente do que a
 publicação escreve ou faz o `INSERT` falhar com erro obscuro, ou — pior — aceita número em
 coluna `TEXT` e quebra `ORDER BY`/`SUM`/gráfico no front, sem erro nenhum.

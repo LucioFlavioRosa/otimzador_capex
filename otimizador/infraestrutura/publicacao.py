@@ -30,42 +30,12 @@ import os as _os
 
 import pandas as pd
 
-# tabelas que vao para o Postgres (as snapshot__* ficam so no blob)
-TABELAS_SERVICO = [
-    "run_meta", "run_obra", "run_subbacia", "run_subbacia_ano", "run_sistema",
-    "run_dependencia",
-    "run_ano", "run_mes",
-    "run_cidade", "run_cidade_ano", "run_cobertura", "run_meta_cobertura",
-    "run_paridade", "run_auditoria",
-]
-PREFIXO = "otim_"
+# O contrato das tabelas publicadas (nomes, PKs, indices) e LINGUAGEM UBIQUA e mora no
+# dominio — o portao de qualidade tambem depende dele. Reexportado aqui por
+# compatibilidade: `publicacao.CHAVES` continua valendo.
+from otimizador.dominio.contrato_resultado import (  # noqa: F401
+    TABELAS_SERVICO, PREFIXO, CHAVES, INDICES)
 
-# chaves e indices pensados no que o front consulta
-CHAVES = {
-    "run_meta":          ("run_id",),
-    "run_obra":          ("run_id", "obra_id"),
-    "run_subbacia":      ("run_id", "sub_bacia"),
-    "run_subbacia_ano":  ("run_id", "sub_bacia", "ano"),
-    "run_sistema":       ("run_id", "sistema"),
-    "run_dependencia":   ("run_id", "obra_id", "sub_bacia"),
-    "run_ano":           ("run_id", "ano"),
-    "run_mes":           ("run_id", "mes_indice"),
-    "run_cidade":        ("run_id", "cidade"),
-    "run_cidade_ano":    ("run_id", "cidade", "ano"),
-    "run_cobertura":     ("run_id", "cidade", "ano"),
-    "run_meta_cobertura": ("run_id", "cidade", "ano"),
-    "run_paridade":      ("run_id", "cidade", "ano"),
-    "run_auditoria":     None,                       # sem PK natural (violacoes + reparos)
-}
-INDICES = {
-    "run_obra":        [("run_id", "cidade"), ("run_id", "status"), ("run_id", "categoria_motivo")],
-    "run_subbacia":    [("run_id", "cidade"), ("run_id", "faturando")],
-    "run_dependencia": [("run_id", "sub_bacia"), ("run_id", "obra_id")],
-    "run_subbacia_ano": [("run_id", "sub_bacia"), ("run_id", "cidade", "ano")],
-    "run_cobertura":   [("run_id", "cidade")],
-    "run_sistema":     [("run_id", "cidade")],
-    "run_mes":         [("run_id", "ano")],
-}
 COLUNAS_JSONB = {"capex_componentes", "params_extra", "peso_cidade", "orcamento_por_ano",
                  "obrig_desconsideradas", "detalhe"}
 # tipos que nao dao para inferir do dtype (coluna toda nula, data em texto, etc.)
@@ -337,7 +307,7 @@ def gravar_diagnostico(pg, run_id, relatorio, schema="controle"):
 def publicar_blob(tabs, destino, formato="parquet", incluir_snapshot=True, verbose=True):
     """Grava a copia integral no ADLS Gen2 / DBFS / disco — inclusive as abas do banco
     de entrada, que NAO vao para o Postgres. E a camada de reproducao e auditoria."""
-    import persistencia as _P
+    from otimizador.infraestrutura import persistencia as _P
     alvo = {k: v for k, v in tabs.items()
             if incluir_snapshot or not k.startswith("snapshot__")}
     return _P.salvar(alvo, destino, formato=formato, verbose=verbose)

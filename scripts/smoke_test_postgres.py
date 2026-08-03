@@ -7,7 +7,7 @@ LEITURA DE CODIGO, nao por execucao.
     # Postgres efemero:
     docker run --rm -d -p 5433:5432 -e POSTGRES_PASSWORD=teste --name pg-otim postgres:16
 
-    python smoke_test_postgres.py --pg "postgresql://postgres:teste@localhost:5433/postgres"
+    python main.py smoke --pg "postgresql://postgres:teste@localhost:5433/postgres"
 
 O que ele faz, nesta ordem (cada passo imprime OK/FALHA e o porque):
 
@@ -43,9 +43,11 @@ import traceback
 import matplotlib
 matplotlib.use("Agg")                     # o dashboard importa pyplot; sem backend grafico
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+# este script vive em scripts/; a raiz do repo (onde esta o pacote `otimizador`) e o pai
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+SQL = os.path.join("otimizador", "infraestrutura", "sql")
 
 FIXTURE_PADRAO = os.path.join("tests", "fixtures", "banco_teste_CTS_poc_v2.xlsx")
 RUN_ID = "smoke_0001"
@@ -170,8 +172,8 @@ def _derrubar(conn, schemas):
 
 # --------------------------------------------------------------------- os passos
 def passo_ddl(conn, rel, s_in, s_ctrl, s_pub):
-    for arquivo, mapa in (("ddl_input.sql", {"input": s_in, "controle": s_ctrl}),
-                          ("ddl_resultado.sql", {"public": s_pub})):
+    for arquivo, mapa in ((os.path.join(SQL, "ddl_input.sql"), {"input": s_in, "controle": s_ctrl}),
+                          (os.path.join(SQL, "ddl_resultado.sql"), {"public": s_pub})):
         try:
             with conn:
                 with conn.cursor() as cur:
@@ -204,7 +206,7 @@ def passo_ddl(conn, rel, s_in, s_ctrl, s_pub):
 def passo_carga(conn, rel, s_in, fixture):
     import pandas as pd
     from psycopg2.extras import execute_values
-    import carregar_postgres as C
+    from otimizador.infraestrutura import carregar_postgres as C
 
     caminho = fixture if os.path.isabs(fixture) else os.path.join(ROOT, fixture)
     if not os.path.exists(caminho):
@@ -266,7 +268,7 @@ def passo_run_request(conn, rel, s_ctrl, params):
 
 
 def passo_rodar(conn, rel, pg, s_in, s_ctrl, s_pub, rotulo="roda o job"):
-    from job_databricks import rodar
+    from otimizador.aplicacao.job_databricks import rodar
     try:
         with contextlib.redirect_stdout(io.StringIO()) as saida:
             r = rodar(RUN_ID, pg, schema_input=s_in, schema_ctrl=s_ctrl, schema_pub=s_pub)
@@ -351,7 +353,7 @@ def main(argv=None):
     if not a.pg:
         print("ERRO: informe --pg ou defina OTIMIZADOR_PG_TESTE.\n"
               "  docker run --rm -d -p 5433:5432 -e POSTGRES_PASSWORD=teste --name pg-otim postgres:16\n"
-              '  python smoke_test_postgres.py --pg "postgresql://postgres:teste@localhost:5433/postgres"')
+              '  python main.py smoke --pg "postgresql://postgres:teste@localhost:5433/postgres"')
         return 2
 
     s_in, s_ctrl, s_pub = (("input", "controle", "public") if a.schemas_reais

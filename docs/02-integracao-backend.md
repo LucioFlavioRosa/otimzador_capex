@@ -30,7 +30,7 @@ algo está sendo calculado no lugar errado.
 
 ## 2.2 Passo 1 — o cadastro (`input`)
 
-16 tabelas, criadas por `ddl_input.sql`. Os nomes de coluna são **lidos de forma estrita** pelo
+16 tabelas, criadas por `otimizador/infraestrutura/sql/ddl_input.sql`. Os nomes de coluna são **lidos de forma estrita** pelo
 motor: não há fallback para nome antigo (há um teste que garante isso). Renomear coluna quebra
 a leitura em silêncio — a aba simplesmente vem sem aquele campo.
 

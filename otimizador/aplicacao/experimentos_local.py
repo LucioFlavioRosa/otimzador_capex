@@ -4,18 +4,18 @@ O motor e o solver sao Python puro: leem um .xlsx e devolvem o plano. Nada aqui 
 cluster, banco ou credencial. E o jeito mais rapido de entender o que o otimizador faz e de
 testar hipoteses ("e se o orcamento cair pela metade?", "quanto a CTS custa em VPL?").
 
-    python experimentos_local.py                          # uma rodada com o banco de teste
-    python experimentos_local.py --orcamento 15e6         # teto anual de R$ 15 mi
-    python experimentos_local.py --foco-cobertura 0.7     # priorizando cobertura
-    python experimentos_local.py --sem-cts --so-residencial
-    python experimentos_local.py --salvar resultados/     # grava as 14 tabelas em CSV
+    python main.py experimento                          # uma rodada com o banco de teste
+    python main.py experimento --orcamento 15e6         # teto anual de R$ 15 mi
+    python main.py experimento --foco-cobertura 0.7     # priorizando cobertura
+    python main.py experimento --sem-cts --so-residencial
+    python main.py experimento --salvar resultados/     # grava as 14 tabelas em CSV
 
-    python experimentos_local.py --comparar foco          # varre o foco e compara
-    python experimentos_local.py --comparar orcamento     # varre o teto e compara
-    python experimentos_local.py --comparar cts           # com CTS x sem CTS
-    python experimentos_local.py --comparar industrial    # com x sem parcela industrial
+    python main.py experimento --comparar foco          # varre o foco e compara
+    python main.py experimento --comparar orcamento     # varre o teto e compara
+    python main.py experimento --comparar cts           # com CTS x sem CTS
+    python main.py experimento --comparar industrial    # com x sem parcela industrial
 
-    python experimentos_local.py --listar-bancos          # os bancos disponiveis
+    python main.py experimento --listar-bancos          # os bancos disponiveis
 
 O passo a passo completo, do zero ate rodar o job inteiro contra um Postgres local, esta em
 docs/07-rodar-local.md.
@@ -32,9 +32,9 @@ import time
 import matplotlib
 matplotlib.use("Agg")                     # o dashboard importa pyplot; sem janela grafica
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+# raiz do REPO (este arquivo vive em otimizador/aplicacao/): e dela que saem os caminhos
+# relativos dos bancos de teste (tests/fixtures) e das pastas de saida.
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 FIXTURES = os.path.join("tests", "fixtures")
 BANCOS = {
@@ -49,10 +49,10 @@ BANCOS = {
 
 # --------------------------------------------------------------------- motor
 def _modulos():
-    import dashboard_otimizador_v2 as D
-    import otimizador_capex_v62 as M
-    import persistencia as P
-    import qualidade as Q
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.dominio import otimizador_capex_v62 as M
+    from otimizador.dominio import qualidade as Q
+    from otimizador.infraestrutura import persistencia as P
     D.set_engine(M)
     P.set_engine(M, D)
     return M, P, Q
@@ -85,7 +85,7 @@ def _resolver(cen, max_time_s, workers, build_all, verboso=False):
             res = M.avaliar(cen, plano)
             res.setdefault("milp_status", "BUILD-ALL (sem solver)")
         else:
-            import otimizador_capex_cpsat63 as CP
+            from otimizador.dominio import otimizador_capex_cpsat63 as CP
             res = CP.resolver_por_sistema(cen, max_time_s=max_time_s, workers=workers)
     return res, time.perf_counter() - t0
 

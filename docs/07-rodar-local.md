@@ -28,7 +28,7 @@ python -m pip install -r requirements-prod.txt
 python -m pytest -q tests/
 ```
 
-Esperado: **69 passed, 13 skipped**. Os 13 skips são normais — 12 precisam de Postgres
+Esperado: **66 passed, 13 skipped**. Os 13 skips são normais — 12 precisam de Postgres
 (nível B) e 1 precisa de uma suíte legada que não acompanha o pacote. Detalhes em
 [`04-testes-executar.md`](04-testes-executar.md).
 
@@ -42,7 +42,7 @@ que vem depois.
 ### A.1 Uma primeira rodada
 
 ```bash
-python experimentos_local.py
+python main.py experimento
 ```
 
 Isso carrega um banco de teste `.xlsx`, roda o solver OR-Tools, materializa as 14 tabelas em
@@ -65,7 +65,7 @@ roda em produção antes de publicar** — se ele reprova, a rodada não vai par
 ### A.2 Os bancos disponíveis
 
 ```bash
-python experimentos_local.py --listar-bancos
+python main.py experimento --listar-bancos
 ```
 
 Três fixtures acompanham o pacote, cada uma exercitando um aspecto: `cts` (o default, com
@@ -76,11 +76,11 @@ cliente está versionado.
 ### A.3 Mexer nos parâmetros
 
 ```bash
-python experimentos_local.py --orcamento 2e6            # teto anual apertado
-python experimentos_local.py --foco-cobertura 1.0       # cobertura acima de VPL
-python experimentos_local.py --sem-cts                  # CTS agregada, não como nó
-python experimentos_local.py --banco classe --so-residencial
-python experimentos_local.py --ete-faseada              # ETE vira K obras-módulo
+python main.py experimento --orcamento 2e6            # teto anual apertado
+python main.py experimento --foco-cobertura 1.0       # cobertura acima de VPL
+python main.py experimento --sem-cts                  # CTS agregada, não como nó
+python main.py experimento --banco classe --so-residencial
+python main.py experimento --ete-faseada              # ETE vira K obras-módulo
 ```
 
 Estes são exatamente os parâmetros que, em produção, chegam no `params` da `run_request` —
@@ -90,7 +90,7 @@ está em [`02-integracao-backend.md`](02-integracao-backend.md) §2.3.
 ### A.4 Comparar cenários — é aqui que se aprende o modelo
 
 ```bash
-python experimentos_local.py --comparar orcamento
+python main.py experimento --comparar orcamento
 ```
 
 ```
@@ -110,9 +110,9 @@ restringir — daí para cima nada muda.
 As outras dimensões:
 
 ```bash
-python experimentos_local.py --comparar foco --orcamento 2e6   # VPL x cobertura
-python experimentos_local.py --comparar cts                    # quanto a CTS custa em VPL
-python experimentos_local.py --banco classe --comparar industrial
+python main.py experimento --comparar foco --orcamento 2e6   # VPL x cobertura
+python main.py experimento --comparar cts                    # quanto a CTS custa em VPL
+python main.py experimento --banco classe --comparar industrial
 ```
 
 > **Cuidado com o teto folgado.** Se o orçamento não restringe, **todos os cenários dão o
@@ -123,8 +123,8 @@ python experimentos_local.py --banco classe --comparar industrial
 ### A.5 Ver o plano e as tabelas
 
 ```bash
-python experimentos_local.py --detalhe                 # obra a obra: início, pronta, capex
-python experimentos_local.py --salvar resultados/      # as 14 tabelas em CSV
+python main.py experimento --detalhe                 # obra a obra: início, pronta, capex
+python main.py experimento --salvar resultados/      # as 14 tabelas em CSV
 ```
 
 Abra `resultados/run_obra/dados.csv`: cada obra tem `construida`, `data_inicio`,
@@ -138,7 +138,7 @@ para o blob, nunca para o Postgres.
 ### A.6 O atalho `--build-all`
 
 ```bash
-python experimentos_local.py --build-all
+python main.py experimento --build-all
 ```
 
 Constrói tudo no início, sem solver: instantâneo e determinístico. Serve de **piso de
@@ -162,12 +162,12 @@ Sem Docker? Qualquer Postgres 12+ serve — inclusive um instalado localmente. S
 ### B.2 O smoke test
 
 ```bash
-python smoke_test_postgres.py --pg "postgresql://postgres:teste@localhost:5433/postgres"
+python main.py smoke --pg "postgresql://postgres:teste@localhost:5433/postgres"
 ```
 
 Este é **o** comando. Ele faz o pipeline inteiro e confere cada etapa:
 
-1. aplica `ddl_input.sql` e `ddl_resultado.sql` — 16 tabelas de entrada, 14 de saída, 3 views;
+1. aplica `otimizador/infraestrutura/sql/ddl_input.sql` e `otimizador/infraestrutura/sql/ddl_resultado.sql` — 16 tabelas de entrada, 14 de saída, 3 views;
 2. carrega uma fixture nas tabelas de `input` — é aqui que as PKs e FKs encostam em dado real;
 3. insere uma `controle.run_request`;
 4. roda `job_databricks.rodar()` fim a fim;
@@ -202,7 +202,7 @@ Os 12 que estavam pulando agora rodam: idempotência, atomicidade da transação
 ### B.4 Olhar o resultado no banco
 
 ```bash
-python smoke_test_postgres.py --pg "..." --manter
+python main.py smoke --pg "..." --manter
 psql "postgresql://postgres:teste@localhost:5433/postgres"
 ```
 
@@ -226,7 +226,7 @@ Databricks ali**. Com o banco do nível B de pé e o schema criado:
 
 ```python
 import json, psycopg2
-from job_databricks import rodar
+from otimizador.aplicacao.job_databricks import rodar
 
 PG = "postgresql://postgres:teste@localhost:5433/postgres"
 

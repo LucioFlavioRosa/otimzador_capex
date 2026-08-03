@@ -38,7 +38,7 @@ def require_bank(path):
 
 
 def engine():
-    import otimizador_capex_v62 as M
+    from otimizador.dominio import otimizador_capex_v62 as M
     return M
 
 
@@ -48,8 +48,8 @@ def solver_or_skip():
     import pytest
     try:
         import ortools  # noqa: F401
-        import otimizador_capex_v62 as M
-        import otimizador_capex_cpsat63 as CP
+        from otimizador.dominio import otimizador_capex_v62 as M
+        from otimizador.dominio import otimizador_capex_cpsat63 as CP
     except Exception as e:  # pragma: no cover - depende do ambiente
         pytest.skip(f"OR-Tools indisponivel: {e}")
     # compat com testes_otimizador.py, que importa os nomes antigos
