@@ -5,7 +5,7 @@ futuras não quebrem o comportamento atual.
 
 ## Como rodar
 
-Da pasta do pacote (onde estão os `.py` e o `pytest.ini`):
+Da **raiz do projeto** (onde estão o `main.py`, o `pytest.ini` e o pacote `otimizador/`):
 
 ```bash
 pip install -r requirements-prod.txt     # pytest + ortools + pandas + matplotlib + openpyxl

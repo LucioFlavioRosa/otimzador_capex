@@ -10,7 +10,7 @@ mudou o comportamento de propósito (e aí é uma decisão consciente, ver §4.6
 
 ## 4.1 Setup
 
-Da pasta do pacote (onde estão os `.py` e o `pytest.ini`):
+Da **raiz do projeto** (onde estão o `main.py`, o `pytest.ini` e o pacote `otimizador/`):
 
 ```bash
 python -m pip install -r requirements-prod.txt
@@ -28,8 +28,8 @@ Se você não vai rodar o pipeline, o mínimo para a suíte é:
 
 ```
 $ python -m pytest tests/
-79 collected
-66 passed, 13 skipped in 2.9s
+82 collected
+69 passed, 13 skipped in 2.9s
 ```
 
 | Arquivo | Testes |
@@ -39,7 +39,7 @@ $ python -m pytest tests/
 | `test_classe.py` | 7 |
 | `test_derivadas.py` | 2 |
 | `test_regressao_golden.py` | 4 |
-| `test_producao.py` | 36 |
+| `test_producao.py` | 39 |
 | `test_publicacao_postgres.py` | 12 |
 
 **Os 13 skips são esperados**, não são falha:
@@ -49,9 +49,14 @@ $ python -m pytest tests/
 | 12 | `test_publicacao_postgres.py` | precisa de um Postgres | definir `OTIMIZADOR_PG_TESTE` (§4.4) |
 | 1 | `test_nucleo.py::test_separabilidade_por_cidade_e_exata` | importa `testes_otimizador`, a suíte legada que **não acompanha** este pacote | copiar `testes_otimizador.py` para a pasta |
 
-São 5 testes marcados `solver`; um deles (a separabilidade) já está entre os 13 skips acima,
-então sem OR-Tools instalado o total sobe para 17 — mais 4 do que o normal. Sem matplotlib,
-mais 1.
+**Faltando uma dependência opcional, o número de skips sobe** — e nunca vira falha (medido):
+
+| Ambiente | Resultado | Quem pula a mais |
+|---|---|---|
+| completo | **69 passed, 13 skipped** | — |
+| sem `ortools` | 58 passed, **24 skipped** | 5 marcados `solver` + 7 de `rodar()`, que usa o CP-SAT |
+| sem `matplotlib` | 60 passed, **22 skipped** | 9 de `test_producao.py` — a materialização importa o `dashboard` |
+
 **Nenhum skip é aceitável em vermelho:** se um teste *falhar* em vez de pular, é bug.
 
 ---
@@ -103,7 +108,8 @@ docker rm -f pg-otim
 
 ### O smoke test (rode este primeiro)
 
-`smoke_test_postgres.py` faz o pipeline inteiro contra um Postgres: aplica os dois DDL,
+`scripts/smoke_test_postgres.py` (via `main.py smoke`) faz o pipeline inteiro contra um
+Postgres: aplica os dois DDL,
 carrega uma fixture nas tabelas de `input`, insere uma `run_request`, roda o job fim a fim,
 confere as reconciliações **no banco** e **roda a mesma `run_id` de novo** para provar a
 idempotência. É o teste que a suíte não consegue fazer.
@@ -152,7 +158,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - run: pip install -r requirements-prod.txt
-      - run: pytest -q tests/          # 66 passed, 13 skipped
+      - run: pytest -q tests/          # 69 passed, 13 skipped
 
   com-postgres:
     runs-on: ubuntu-latest
@@ -218,9 +224,9 @@ Rodam em qualquer sessão (local, CI, Colab) sem banco externo.
 
 | Sintoma | Causa | Solução |
 |---|---|---|
-| `ModuleNotFoundError: otimizador_capex_v62` | rodou de fora da pasta do pacote | rode da pasta que tem o `pytest.ini`; `tests/_helpers.py` insere a raiz no `sys.path` |
-| `ModuleNotFoundError: matplotlib` | dependência do `dashboard_otimizador_v2` | `pip install matplotlib` (já está no `requirements-prod.txt`) |
-| 4 testes pulando com "OR-Tools indisponivel" | `ortools` ausente | `pip install ortools` |
+| `ModuleNotFoundError: No module named 'otimizador'` | rodou de fora da raiz do projeto | rode da pasta que tem o `main.py` e o `pytest.ini`; `tests/_helpers.py` insere essa raiz no `sys.path` |
+| `ModuleNotFoundError: matplotlib` | dependência do `dashboard_otimizador_v2` | `pip install matplotlib` (já está no `requirements-prod.txt`); sem ele, 9 testes **pulam** em vez de falhar |
+| 12 pulando com "OR-Tools indisponivel" / "rodar() usa o CP-SAT" | `ortools` ausente | `pip install ortools` |
 | 12 pulando com "defina OTIMIZADOR_PG_TESTE" | comportamento esperado | §4.4 |
 | 1 pulando com "suite legada ausente" | comportamento esperado | §4.2 |
 | Golden falhou sem você mexer no motor | versão de pandas/numpy mudou o arredondamento | investigue **antes** de atualizar o golden |

@@ -11,6 +11,17 @@ Alvo: Python 3.10+, Databricks Runtime.
 > ao *executar* o portão, e estão marcados como tal. O achado **C4** foi corrigido no
 > diagnóstico depois do teste: a consequência não era publicação silenciosa, e sim um
 > `OverflowError` opaco dentro do CP-SAT. Ver §6 para o resumo do que mudou em cada arquivo.
+>
+> 📍 **Os caminhos deste documento são os de antes da reorganização em camadas** (merge
+> `1126b85`, 2026-08-03). As citações `arquivo.py:linha` valem para o layout flat em que a
+> revisão foi feita e **não foram reescritas de propósito** — reescrevê-las daria a impressão
+> de que os números de linha ainda batem, e eles não batem. Para localizar um arquivo hoje:
+> `otimizador_capex_v62.py` e `otimizador_capex_cpsat63.py` e `qualidade.py` estão em
+> `otimizador/dominio/`; `job_databricks.py` em `otimizador/aplicacao/`;
+> `carregar_postgres.py`, `persistencia.py` e `publicacao.py` em `otimizador/infraestrutura/`;
+> os `.sql` em `otimizador/infraestrutura/sql/`; `leitor_v2.py` e `dashboard_otimizador_v2.py`
+> em `otimizador/apresentacao/`; `smoke_test_postgres.py` e `gerar_ddl_resultado.py` em
+> `scripts/`. O conteúdo dos achados continua válido — só o endereço mudou.
 
 ---
 

@@ -16,20 +16,33 @@ explicabilidade). O mapa de cada camada está em `otimizador/__init__.py`.
 
 ## Arquivos
 
+```
+main.py                  entrada única:  rodar | experimento | smoke | gerar-ddl
+otimizador/
+  dominio/               motor puro, solver, portão de qualidade, contrato do resultado
+  aplicacao/             job de produção (Databricks) e experimentos locais
+  infraestrutura/        adaptadores de I/O (Postgres, materialização, publicação) + sql/
+  apresentacao/          contrato de leitura das telas e explicabilidade
+scripts/                 ferramentas de operação (smoke, gerador de DDL)
+tests/                   suíte de regressão
+```
+
 | Camada | Arquivo | Papel |
 |---|---|---|
-| **Motor (puro)** | `otimizador_capex_v62.py` | carga do banco, modelo, `avaliar`. Sem I/O. |
-| **Solver** | `otimizador_capex_cpsat63.py` | OR-Tools (geração de colunas por cidade) |
-| **Apoio** | `dashboard_otimizador_v2.py` | usado pela persistência (explicabilidade) |
-| **Persistência** | `persistencia.py` | materializa a rodada em 14 tabelas `run_*` |
-| **Publicação** | `publicacao.py` | DDL de resultado, escrita idempotente, status, diagnóstico |
-| **Leitura (contrato)** | `leitor_v2.py` | como o front reconstrói as telas (lado de consumo) |
-| **Adaptador (Fase 2)** | `carregar_postgres.py` | Postgres (input) → **Cenário** (reusa o motor) |
-| **Qualidade (Fase 3)** | `qualidade.py` | portão por rodada, antes de publicar |
-| **Job (Fase 4)** | `job_databricks.py` | orquestração fim-a-fim |
-| **DDL (Fase 1)** | `otimizador/infraestrutura/sql/ddl_input.sql` | tabelas de input + controle |
-| **DDL (resultado)** | `otimizador/infraestrutura/sql/ddl_resultado.sql` | `public.otim_*` — gerado por `gerar_ddl_resultado.py` |
-| **Docs** | `Plano_Producao_Databricks.md` | arquitetura e fases (para revisão) |
+| **domínio** | `otimizador/dominio/otimizador_capex_v62.py` | carga do banco, modelo, `avaliar`. Sem I/O. |
+| **domínio** | `otimizador/dominio/otimizador_capex_cpsat63.py` | solver OR-Tools (geração de colunas por cidade) |
+| **domínio** (Fase 3) | `otimizador/dominio/qualidade.py` | portão por rodada, antes de publicar |
+| **domínio** | `otimizador/dominio/contrato_resultado.py` | as 14 tabelas publicadas, PKs e índices |
+| **aplicação** (Fase 4) | `otimizador/aplicacao/job_databricks.py` | orquestração fim-a-fim |
+| **aplicação** | `otimizador/aplicacao/experimentos_local.py` | rodadas locais (`main.py experimento`) |
+| **infraestrutura** | `otimizador/infraestrutura/persistencia.py` | materializa a rodada em 14 tabelas `run_*` |
+| **infraestrutura** | `otimizador/infraestrutura/publicacao.py` | DDL de resultado, escrita idempotente, status, diagnóstico |
+| **infraestrutura** (Fase 2) | `otimizador/infraestrutura/carregar_postgres.py` | Postgres (input) → **Cenário** (reusa o motor) |
+| **infraestrutura** (Fase 1) | `otimizador/infraestrutura/sql/ddl_input.sql` | tabelas de input + controle |
+| **infraestrutura** | `otimizador/infraestrutura/sql/ddl_resultado.sql` | `public.otim_*` — gerado por `main.py gerar-ddl` |
+| **apresentação** | `otimizador/apresentacao/leitor_v2.py` | como o front reconstrói as telas (lado de consumo) |
+| **apresentação** | `otimizador/apresentacao/dashboard_otimizador_v2.py` | usado pela persistência (explicabilidade) |
+| **Docs** | `Plano_Producao_Databricks.md` | arquitetura e fases (histórico) |
 
 ## Ordem do fluxo (uma rodada)
 
@@ -102,12 +115,12 @@ rodar(run_id=dbutils.widgets.get("run_id"),
 
 ## Testes
 
-- **Qualidade por rodada:** `qualidade.checar()` roda no job, antes de salvar.
+- **Qualidade por rodada:** `otimizador.dominio.qualidade.checar()` roda no job, antes de salvar.
 - **Regressão de código (CI):** `pytest` na pasta `tests/` — deve estar verde antes do deploy.
 
 ```bash
 pip install -r requirements-prod.txt
-pytest tests/            # 79 testes; os de solver pulam se faltar ortools
+pytest tests/            # 82 testes: 69 passed, 13 skipped (os de solver/Postgres pulam sozinhos)
 ```
 
 `tests/test_producao.py` cobre a camada de produção (tradução de `run_request.params`, portão

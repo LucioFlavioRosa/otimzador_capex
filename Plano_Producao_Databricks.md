@@ -2,7 +2,15 @@
 > Este é o plano original, mantido como registro das decisões de arquitetura (§1 e §4 seguem
 > válidos e valem a leitura). Os números e estados **estão desatualizados**: fala em "26
 > testes" (são 82), "13 tabelas `run_*`" (são 14), Fase 4 como "esqueleto" com TODOs que já
-> foram feitos, e caminhos `producao/*` que não existem — o pacote é flat.
+> foram feitos, e caminhos `producao/*` que nunca existiram.
+>
+> **Onde o código mora hoje** (reorganização em camadas, merge `1126b85` de 2026-08-03): o
+> pacote é `otimizador/`, com `dominio/` (motor, solver, `qualidade.py`, contrato),
+> `aplicacao/` (`job_databricks.py`, experimentos), `infraestrutura/` (`carregar_postgres.py`,
+> `persistencia.py`, `publicacao.py`, `sql/`) e `apresentacao/` (`leitor_v2.py`, dashboard).
+> Entrada única em `main.py`. Leia qualquer `producao/x.py` deste plano como o arquivo
+> correspondente nessa estrutura. A **Fase 5** aqui descrita (wheel com módulos `engine`/
+> `dados`/`job`) foi substituída: o recorte real é o das quatro camadas.
 >
 > Para o estado atual: [`docs/README.md`](docs/README.md) (documentação por assunto) e
 > [`REVISAO_PRODUCAO.md`](REVISAO_PRODUCAO.md) (o que foi revisado, corrigido e o que

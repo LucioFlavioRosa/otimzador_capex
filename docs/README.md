@@ -49,12 +49,13 @@ Pipeline inteiro contra o Postgres, incluindo a republicação do mesmo `run_id`
 
 ## O mínimo absoluto, se você só tem 5 minutos
 
-1. O motor é **puro** — nada de I/O em `otimizador_capex_*.py`. Leitura em
-   `carregar_postgres.py`, escrita em `publicacao.py`.
+1. O motor é **puro** — nada de I/O em `otimizador/dominio/`. Leitura em
+   `otimizador/infraestrutura/carregar_postgres.py`, escrita em
+   `otimizador/infraestrutura/publicacao.py`. Entrada única: `main.py`.
 2. O **`run_id` vem do backend** e amarra `controle.run_request` → `controle.run_status` →
    `public.otim_meta`.
 3. **Reprocessar o mesmo `run_id` é seguro**: apaga e regrava, numa transação só.
 4. **Chave desconhecida em `params` é erro**; chave ausente usa o default do motor, nunca um
    default do job.
-5. `pytest tests/` → **66 passed, 13 skipped**. Os 13 skips são esperados (12 precisam de
+5. `pytest tests/` → **69 passed, 13 skipped**. Os 13 skips são esperados (12 precisam de
    Postgres, 1 precisa da suíte legada).
