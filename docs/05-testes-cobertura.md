@@ -3,7 +3,7 @@
 Público: quem vai mudar o código e precisa saber **o que já está protegido** e **o que não
 está**. Também serve como especificação executável: cada teste é uma regra de negócio escrita.
 
-Panorama: **82 testes em 7 arquivos**, mais o **portão de qualidade por rodada** (14 checagens
+Panorama: **83 testes em 7 arquivos**, mais o **portão de qualidade por rodada** (14 checagens
 críticas), que é um mecanismo diferente e complementar — ver §5.8.
 
 ---
@@ -76,7 +76,7 @@ invariante de otimalidade `VPL(solver) ≥ VPL(build-all)`.
 Este é o teste que decide se uma refatoração foi neutra. Atualizar o golden é uma decisão
 consciente — ver `04-testes-executar.md` §4.6.
 
-## 5.6 `test_producao.py` — a camada de produção (39 testes)
+## 5.6 `test_producao.py` — a camada de produção (40 testes)
 
 Nenhum precisa de banco. Cobrem os bugs mais caros encontrados na revisão do pacote.
 
@@ -121,12 +121,16 @@ snapshot temporário (dois jobs no mesmo driver não se atropelam), a remoção 
 fim, e os dois ramos de saída — `FALHOU_QUALIDADE` **não publica**, e erro técnico marca
 `ERRO` e **re-levanta** a exceção.
 
-### Materialização e notificação (5 testes)
+### Materialização e notificação (6 testes)
 
 - **Propagação do `run_id`** — `materializar(..., run_id=X)` marca **todas** as tabelas com
   `X`. Sem isso, cada rodada gerava um id novo: `controle.*` e `public.otim_*` deixavam de
   casar e cada retry publicava de novo em vez de substituir.
 - **Snapshot do cadastro** — a materialização gera as `snapshot__*` a partir do arquivo fonte.
+- **`blob_uri` aponta para um caminho que existe** — o ponteiro da auditoria. Até 2026-08-04
+  gravava `<destino>/run_id=<rid>`, que a gravação nunca cria: `salvar` particiona por `run_id`
+  **dentro** de cada tabela (`<destino>/<tabela>/run_id=<rid>/`). Não havia perda de dado, mas
+  quem seguisse `otim_meta.blob_uri` para achar o snapshot congelado não achava nada.
 - **Tabela obrigatória vazia é erro; tabela tolerada vazia só avisa.**
 - **Falha ao notificar não derruba a publicação** — a notificação é pós-commit; o dado já está
   gravado quando ela roda.

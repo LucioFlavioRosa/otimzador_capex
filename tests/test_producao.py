@@ -305,6 +305,34 @@ def test_materializar_gera_snapshot_do_arquivo_fonte():
     assert com["run_meta"].iloc[0]["banco_arquivo"] == "postgres://input"
 
 
+def test_blob_uri_aponta_para_um_caminho_que_existe(tmp_path):
+    """`otim_meta.blob_uri` e o ponteiro da AUDITORIA: e por ele que alguem acha, meses
+    depois, a copia congelada do cadastro. Ate 2026-08-04 ele gravava
+    `<destino>/run_id=<rid>` — um caminho que a gravacao nunca cria, porque `salvar`
+    particiona por run_id DENTRO de cada tabela (`<destino>/<tabela>/run_id=<rid>/`).
+    Nao havia perda de dado, mas quem seguisse o ponteiro nao achava nada."""
+    pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
+    import glob
+    import os
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.infraestrutura import persistencia as P
+    from otimizador.infraestrutura import publicacao as PUB
+    from _helpers import BANK_CTS, load_cts, build_all, silent
+    M = engine()
+    D.set_engine(M); P.set_engine(M, D)
+
+    rid = "blob_ptr_1"
+    tabs = silent(P.materializar, load_cts(True), build_all(load_cts(True)),
+                  run_id=rid, banco="postgres://input", arquivo_fonte=BANK_CTS)
+    silent(PUB.publicar_blob, tabs, str(tmp_path), verbose=False)
+
+    uri = PUB.uri_blob(str(tmp_path), rid)
+    assert os.path.isdir(uri), f"blob_uri aponta para caminho inexistente: {uri}"
+    # e a copia congelada do cadastro daquela rodada e alcancavel a partir dele
+    assert glob.glob(os.path.join(uri, "snapshot__*", f"run_id={rid}")), \
+        "o snapshot da rodada nao e alcancavel a partir do blob_uri"
+
+
 # ------------------------------------------- tabela obrigatoria mas vazia
 def test_tabela_obrigatoria_vazia_e_erro(monkeypatch, tmp_path):
     """Tabela VAZIA nao e o mesmo que ausente. Um metas_cobertura existente porem vazio

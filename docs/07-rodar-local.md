@@ -28,7 +28,7 @@ python -m pip install -r requirements-prod.txt
 python -m pytest -q tests/
 ```
 
-Esperado: **69 passed, 13 skipped**. Os 13 skips são normais — 12 precisam de Postgres
+Esperado: **70 passed, 13 skipped**. Os 13 skips são normais — 12 precisam de Postgres
 (nível B) e 1 precisa de uma suíte legada que não acompanha o pacote. Detalhes em
 [`04-testes-executar.md`](04-testes-executar.md).
 
