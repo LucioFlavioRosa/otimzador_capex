@@ -120,7 +120,7 @@ rodar(run_id=dbutils.widgets.get("run_id"),
 
 ```bash
 pip install -r requirements-prod.txt
-pytest tests/            # 82 testes: 69 passed, 13 skipped (os de solver/Postgres pulam sozinhos)
+pytest tests/            # 83 testes: 70 passed, 13 skipped (os de solver/Postgres pulam sozinhos)
 ```
 
 `tests/test_producao.py` cobre a camada de produção (tradução de `run_request.params`, portão

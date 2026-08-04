@@ -313,8 +313,20 @@ def publicar_blob(tabs, destino, formato="parquet", incluir_snapshot=True, verbo
     return _P.salvar(alvo, destino, formato=formato, verbose=verbose)
 
 
-def uri_blob(destino, run_id):
-    return str(destino).rstrip("/") + f"/run_id={run_id}"
+def uri_blob(destino, run_id=None):
+    """Onde a copia desta rodada FOI gravada — o valor de `otim_meta.blob_uri`.
+
+    `persistencia.salvar` grava UMA PASTA POR TABELA e particiona por run_id DENTRO
+    de cada uma:  <destino>/<tabela>/run_id=<rid>/ . Nao existe pasta unica com a
+    rodada inteira, entao o ponteiro util e a RAIZ: a copia congelada do cadastro da
+    rodada X esta em  <raiz>/snapshot__*/run_id=X/ , e o run_id ja viaja na mesma
+    linha de `otim_meta`.
+
+    Ate 2026-08-04 isto devolvia `<destino>/run_id=<rid>`, caminho que a gravacao
+    NUNCA cria: quem seguisse `otim_meta.blob_uri` para auditar uma rodada nao achava
+    nada. `run_id` fica na assinatura porque os chamadores passam.
+    """
+    return str(destino).rstrip("/")
 
 
 # --------------------------------------------------------------- NOTIFICACAO
