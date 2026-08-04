@@ -30,7 +30,18 @@ O cabeçalho. É o que a tela de histórico consome (via `otim_vw_historico`).
 | `banco_arquivo` / `banco_md5` | TEXT | origem do cadastro e seu hash (no job: `postgres://input`) |
 | `params_extra` | JSONB | **o `params` da `run_request`, como veio** — é aqui que se compara duas rodadas |
 | `rotulo` / `usuario` | TEXT | rótulo da rodada e quem pediu |
-| `blob_uri` | TEXT | cópia integral em parquet, quando o job roda com `blob` configurado; nulo caso contrário |
+| `blob_uri` | TEXT | **raiz** da cópia integral em parquet, quando o job roda com `blob` configurado; nulo caso contrário. Ver a nota abaixo sobre o formato |
+
+> **Como navegar o `blob_uri`.** A gravação usa **uma pasta por tabela**, particionada por
+> rodada: `<blob_uri>/<tabela>/run_id=<run_id>/`. Não existe uma pasta única com a rodada
+> inteira — por isso a coluna guarda a raiz, e o `run_id` vem na mesma linha de `otim_meta`.
+> A cópia congelada do cadastro está em `<blob_uri>/snapshot__*/run_id=<run_id>/`.
+>
+> ⚠️ **Rodadas publicadas antes de 2026-08-04** têm nesta coluna o valor antigo,
+> `<raiz>/run_id=<run_id>` — um caminho que nunca existiu (a gravação sempre foi a de cima).
+> Os dados dessas rodadas estão íntegros na raiz; só o ponteiro está errado. Para corrigir o
+> histórico, se algum dia houver: `UPDATE public.otim_meta SET blob_uri =
+> regexp_replace(blob_uri, '/run_id=[^/]+$', '') WHERE blob_uri LIKE '%/run_id=%';`
 
 **Parâmetros efetivos da rodada**
 
