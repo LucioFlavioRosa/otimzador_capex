@@ -763,3 +763,107 @@ def test_salvar_delta_aceita_modo_explicito(monkeypatch):
 
     (esc,) = estado["escritas"]
     assert esc["mode"] == "append" and "replaceWhere" not in esc["options"]
+
+
+# ------------------------------------------- o run_id vira caminho e literal SQL
+@pytest.mark.parametrize("rid", [
+    "r1' OR run_id <> 'r1",   # fecha o literal do replaceWhere: casaria com TUDO
+    "a/../../outra",          # sai da particao no caminho apagado
+    "com espaco",             # o Spark ESCAPA ao gravar: a pasta real tem outro nome
+    "tem=igual",              # idem — e ainda confunde o parser de particao
+    "",                       # particao `run_id=` sem valor
+])
+def test_run_id_hostil_e_recusado(rid, tmp_path):
+    """O `run_id` e escolhido pelo BACKEND (`docs/02`) e a coluna e `text` sem gramatica
+    no DDL — nao ha barreira antes daqui. Ele e usado em dois lugares perigosos:
+
+    1. literal do `replaceWhere` do Delta. `r1' OR run_id <> 'r1` vira
+       `run_id = 'r1' OR run_id <> 'r1'`, condicao que casa com TUDO: o `overwrite`
+       levaria a tabela inteira, com todas as rodadas dentro. Seria pior que o bug
+       original, que so duplicava.
+    2. caminho da particao apagada. `/` e `..` desviam o `delete` para fora dela.
+
+    E ha um terceiro, mais sorrateiro: caracteres que o Spark escapa ao gravar particao
+    (espaco, `=`, `%`, `/`) fazem a pasta real ter outro nome, que o caminho montado
+    aqui nao encontra — o delete vira no-op e a duplicacao volta em silencio.
+    """
+    from otimizador.infraestrutura import persistencia as P
+
+    tabs = {"run_ano": pd.DataFrame({"run_id": [rid], "ano": [2026]})}
+    with pytest.raises(ValueError, match="run_id invalido"):
+        P.salvar(tabs, str(tmp_path), verbose=False)
+
+
+@pytest.mark.parametrize("rid", ["r1", "run_20260806_120000_ab12cd", "run-2026.08", "R1"])
+def test_run_id_normal_continua_passando(rid, tmp_path):
+    """A guarda nao pode recusar o que o proprio pacote gera: `novo_run_id()` produz
+    `run_<data>_<hex>`, e os rotulos usados a mao sao alfanumericos com `_-.`."""
+    from otimizador.infraestrutura import persistencia as P
+
+    P.salvar({"run_ano": pd.DataFrame({"run_id": [rid], "ano": [2026]})},
+             str(tmp_path), verbose=False)
+    assert len(P.carregar(str(tmp_path))["run_ano"]) == 1
+
+
+def test_novo_run_id_passa_na_propria_guarda():
+    """Trava a coerencia entre gerador e validador: se um mudar sem o outro, o pacote
+    passa a recusar o id que ele mesmo gera."""
+    from otimizador.infraestrutura import persistencia as P
+
+    assert P._exigir_run_id_seguro(P.novo_run_id())
+
+
+def test_dois_run_id_no_mesmo_df_e_erro(tmp_path):
+    """"Substituir a rodada" nao tem significado com duas rodadas no mesmo conjunto: no
+    Spark apagaria duas particoes numa chamada; no pandas colocaria as linhas de uma
+    dentro da pasta da outra. O portao de qualidade barra isso antes de publicar, mas
+    `salvar` e API publica e precisa da propria guarda."""
+    from otimizador.infraestrutura import persistencia as P
+
+    tabs = {"run_ano": pd.DataFrame({"run_id": ["r1", "r2"], "ano": [2026, 2027]})}
+    with pytest.raises(ValueError, match="exatamente um run_id"):
+        P.salvar(tabs, str(tmp_path), verbose=False)
+
+
+def test_run_id_todo_nulo_e_erro(tmp_path):
+    """Antes caia num fallback: no `salvar_delta` a condicao virava `run_id = ''`, que
+    nao casa com linha nenhuma — append disfarcado de substituicao."""
+    from otimizador.infraestrutura import persistencia as P
+
+    tabs = {"run_ano": pd.DataFrame({"run_id": [None, None], "ano": [2026, 2027]})}
+    with pytest.raises(ValueError, match="exatamente um run_id"):
+        P.salvar(tabs, str(tmp_path), verbose=False)
+
+
+def test_falha_ao_consultar_o_catalogo_propaga(monkeypatch):
+    """`_tabela_existe` engolia QUALQUER excecao e respondia "nao existe", o que escolhe
+    o `append`. Permissao negada ou metastore fora do ar viraria append sobre tabela que
+    existe — a duplicacao de volta, em silencio, e justo no ambiente onde ninguem olha.
+    Agora so a ausencia da API (Spark antigo) vira False."""
+    import types
+    from otimizador.infraestrutura import persistencia as P
+
+    def explode(alvo):
+        raise PermissionError("metastore indisponivel")
+
+    sp, _ = _spark_duble()
+    sp.catalog = types.SimpleNamespace(tableExists=explode)
+    monkeypatch.setattr(P, "_spark", lambda: sp)
+    with pytest.raises(PermissionError):
+        P.salvar_delta({"run_ano": pd.DataFrame({"run_id": ["r1"], "ano": [2026]})},
+                       "cat.otim", verbose=False)
+
+
+def test_spark_antigo_sem_a_api_cai_para_criacao(monkeypatch):
+    """O unico fallback que sobra: Spark sem `catalog.tableExists`."""
+    import types
+    from otimizador.infraestrutura import persistencia as P
+
+    sp, estado = _spark_duble()
+    sp.catalog = types.SimpleNamespace()  # sem tableExists -> AttributeError
+    monkeypatch.setattr(P, "_spark", lambda: sp)
+    P.salvar_delta({"run_ano": pd.DataFrame({"run_id": ["r1"], "ano": [2026]})},
+                   "cat.otim", verbose=False)
+
+    (esc,) = estado["escritas"]
+    assert esc["mode"] == "append" and "replaceWhere" not in esc["options"]

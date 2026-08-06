@@ -301,6 +301,24 @@ publicação apaga a rodada anterior (`DELETE FROM otim_meta WHERE run_id = ...`
 diagnóstico, para o status (upsert) e para a cópia congelada em blob, que substitui a
 partição `run_id=<rid>` em vez de acrescentar a ela.
 
+### A gramática do `run_id`
+
+`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` — alfanumérico, `.`, `_` e `-`, começando por
+alfanumérico, até 128 caracteres. O job **recusa** (`ValueError`) qualquer coisa fora
+disso antes de gravar; a coluna no DDL é `text` sem `CHECK`, então quem cunha o id é
+quem garante a forma.
+
+Não é preciosismo de estilo: o `run_id` vira **caminho de partição** no blob e
+**literal SQL** na substituição da rodada em Delta. Uma aspa simples fecharia o
+literal (`r1' OR run_id <> 'r1` casaria com todas as rodadas, e o overwrite levaria a
+tabela inteira); `/` e `..` desviariam o diretório apagado; e qualquer caractere que o
+Spark escapa ao gravar partição (`/`, `=`, `%`, espaço) faria a pasta real ter outro
+nome, com o efeito silencioso de a substituição virar no-op e a duplicação voltar.
+
+`persistencia.novo_run_id()` já gera dentro desta gramática
+(`run_<AAAAMMDD>_<HHMMSS>_<hex6>`); se o backend cunhar o id por conta própria — que é
+o caso — vale espelhar a regra na borda dele.
+
 ### A regra do `run_id`
 
 **Um `run_id` congela na primeira publicação bem-sucedida.**

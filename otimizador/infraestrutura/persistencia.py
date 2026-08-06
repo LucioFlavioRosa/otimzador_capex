@@ -34,6 +34,7 @@ import hashlib as _hl
 import json as _js
 import math as _math
 import os as _os
+import re as _re
 import shutil as _shutil
 import uuid as _uuid
 
@@ -692,20 +693,61 @@ def _spark():
         return None
 
 
-def _rodadas_no_df(df, padrao):
-    """Os `run_id` presentes no df — as particoes que esta gravacao substitui.
+_RUN_ID_VALIDO = _re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _exigir_run_id_seguro(rid):
+    """O `run_id` vira CAMINHO de particao e LITERAL SQL do Delta. Precisa ser inerte
+    nos dois, e a unica barreira e esta: ele e escolhido pelo backend
+    (`docs/02-integracao-backend.md`) e a coluna e `text` sem gramatica no DDL.
+
+    Tres coisas quebram com valor livre, em ordem de gravidade:
+      - **aspa simples fecha o literal do `replaceWhere`.** `r1' OR run_id <> 'r1`
+        vira uma condicao que casa com TUDO, e o `overwrite` leva a tabela Delta
+        inteira — todas as rodadas;
+      - **`/` ou `..` desviam o caminho** que a substituicao apaga, para fora da
+        particao;
+      - **caractere que o Spark ESCAPA ao gravar particao** (`/`, `=`, `%`, espaco,
+        controle) faz a pasta real ter outro nome, que o caminho montado aqui nao
+        encontra: o delete vira no-op e a duplicacao volta, em silencio.
+
+    Recusar e a correcao proporcional — id de rodada nao precisa de caractere exotico,
+    e `novo_run_id()` ja gera dentro desta gramatica.
+    """
+    s = str(rid)
+    if not _RUN_ID_VALIDO.match(s):
+        raise ValueError(
+            f"run_id invalido para gravacao particionada: {s!r}. "
+            "Aceito: [A-Za-z0-9._-], comecando por alfanumerico, ate 128 caracteres."
+        )
+    return s
+
+
+def _rodada_do_df(df, padrao=None):
+    """O `run_id` desta gravacao, validado.
 
     Sai do PROPRIO df, e nao do `run_meta` do conjunto, porque e o dado gravado que
     determina em qual particao ele cai: usar um id de outra origem apagaria a
     particao errada (ou nenhuma).
+
+    Exige UM so. Com dois `run_id` no mesmo df, "substituir a rodada" nao tem
+    significado: a gravacao apagaria duas particoes de uma vez (Spark) ou colocaria as
+    linhas de uma rodada dentro da pasta da outra (pandas). O portao de qualidade ja
+    barra isso antes de publicar, mas `salvar`/`salvar_delta` sao API publica e
+    precisam da propria guarda.
     """
-    if "run_id" not in df.columns or len(df) == 0:
-        return [str(padrao)]
-    vistos = [str(v) for v in pd.unique(df["run_id"].dropna())]
-    return vistos or [str(padrao)]
+    if "run_id" in df.columns and len(df):
+        vistos = [str(v) for v in pd.unique(df["run_id"].dropna())]
+        if len(vistos) != 1:
+            raise ValueError(
+                "gravacao particionada exige exatamente um run_id no conjunto; "
+                f"encontrei {vistos if vistos else 'nenhum (coluna toda nula)'}"
+            )
+        return _exigir_run_id_seguro(vistos[0])
+    return _exigir_run_id_seguro(padrao)
 
 
-def _apagar_particoes_spark(sp, base, rids):
+def _apagar_particao_spark(sp, base, rid):
     """Apaga `<base>/run_id=<rid>/` no storage do Spark (ADLS, DBFS, S3, local).
 
     E o equivalente do `DELETE FROM ... WHERE run_id = %s` que a publicacao no
@@ -714,33 +756,35 @@ def _apagar_particoes_spark(sp, base, rids):
     vez de substitui-lo. Apagar diretorio so vale para formato de arquivo; num Delta
     isso corromperia o log da tabela, e por isso o Delta tem caminho proprio.
     """
-    jvm = sp._jvm
-    conf = sp._jsc.hadoopConfiguration()
-    for rid in rids:
-        p = jvm.org.apache.hadoop.fs.Path(f"{base}/run_id={rid}")
-        fs = p.getFileSystem(conf)
-        if fs.exists(p):
-            fs.delete(p, True)
+    p = sp._jvm.org.apache.hadoop.fs.Path(f"{base}/run_id={rid}")
+    fs = p.getFileSystem(sp._jsc.hadoopConfiguration())
+    if fs.exists(p):
+        fs.delete(p, True)
 
 
 def _tabela_existe(sp, alvo):
-    """A tabela Delta gerenciada ja existe? Na duvida diz que NAO, e o caminho de
-    criacao (append puro) e escolhido — errar para o outro lado faria a primeira
-    gravacao falhar num `replaceWhere` sobre tabela inexistente."""
+    """A tabela Delta gerenciada ja existe? Decide entre criar e substituir a particao.
+
+    So o `AttributeError` (Spark antigo, sem `catalog.tableExists`) vira "nao existe".
+    Erro de permissao, de rede ou do metastore PROPAGA de proposito: tratar falha de
+    consulta como "nao existe" escolheria o `append`, e o append sobre tabela que
+    existe e exatamente a duplicacao que este modulo passou a evitar — silenciosa, e
+    justo no ambiente em que ninguem esta olhando.
+    """
     try:
         return bool(sp.catalog.tableExists(alvo))
-    except Exception:
+    except AttributeError:
         return False
 
 
 def _delta_existe(sp, base):
-    """Ha um Delta gravado em `base`? Decide entre criar e substituir a particao."""
+    """Ha um Delta gravado em `base`? Mesma regra de `_tabela_existe`: so ausencia de
+    API vira False; falha ao consultar o storage propaga."""
     try:
-        jvm = sp._jvm
-        p = jvm.org.apache.hadoop.fs.Path(f"{str(base).rstrip('/')}/_delta_log")
-        return p.getFileSystem(sp._jsc.hadoopConfiguration()).exists(p)
-    except Exception:
+        p = sp._jvm.org.apache.hadoop.fs.Path(f"{str(base).rstrip('/')}/_delta_log")
+    except AttributeError:
         return False
+    return p.getFileSystem(sp._jsc.hadoopConfiguration()).exists(p)
 
 
 def salvar(tabs, destino, formato="parquet", particionar_por_run=True, verbose=True):
@@ -778,23 +822,24 @@ def salvar(tabs, destino, formato="parquet", particionar_por_run=True, verbose=T
             if not particiona:
                 w.mode("append").save(base)
             elif fmt == "delta":
-                rids = _rodadas_no_df(df, rid)
+                rid_tab = _rodada_do_df(df, rid)
                 if _delta_existe(sp, base):
                     # `replaceWhere` e o DELETE+INSERT do Delta: troca so as linhas
                     # desta rodada e deixa as outras intactas. Se a condicao nao for
                     # aceita, ele FALHA — que e o que se quer de um caminho de
                     # escrita, em vez de sobrescrever a tabela inteira em silencio.
-                    cond = " OR ".join(f"run_id = '{r}'" for r in rids)
-                    w = w.mode("overwrite").option("replaceWhere", cond)
+                    # O `run_id` ja passou por `_exigir_run_id_seguro`, sem o que este
+                    # literal seria injetavel.
+                    w = w.mode("overwrite").option("replaceWhere", f"run_id = '{rid_tab}'")
                 else:
                     w = w.mode("append")  # primeira gravacao: nao ha o que substituir
                 w.partitionBy("run_id").save(base)
             else:
-                _apagar_particoes_spark(sp, base, _rodadas_no_df(df, rid))
+                _apagar_particao_spark(sp, base, _rodada_do_df(df, rid))
                 w.mode("append").partitionBy("run_id").save(base)
             escritos.append((nome, base, len(df)))
         else:
-            rid_tab = _rodadas_no_df(df, rid)[0]
+            rid_tab = _rodada_do_df(df, rid) if particionar_por_run else rid
             pasta = base if not particionar_por_run else f"{base}/run_id={rid_tab}"
             if particionar_por_run and _os.path.isdir(pasta):
                 # Mesma regra do lado Spark: a particao da rodada e SUBSTITUIDA.
@@ -848,8 +893,8 @@ def salvar_delta(tabs, schema, modo=None, particionar_por_run=True, verbose=True
         if modo is not None:
             w = w.mode(modo)
         elif particiona and _tabela_existe(sp, alvo):
-            cond = " OR ".join(f"run_id = '{r}'" for r in _rodadas_no_df(df, ""))
-            w = w.mode("overwrite").option("replaceWhere", cond)
+            # `run_id` validado em `_rodada_do_df` — sem isso o literal seria injetavel.
+            w = w.mode("overwrite").option("replaceWhere", f"run_id = '{_rodada_do_df(df)}'")
         else:
             w = w.mode("append")  # tabela ainda nao existe: nao ha o que substituir
         if particiona:

@@ -3,7 +3,7 @@
 Público: quem vai mudar o código e precisa saber **o que já está protegido** e **o que não
 está**. Também serve como especificação executável: cada teste é uma regra de negócio escrita.
 
-Panorama: **93 testes em 7 arquivos**, mais o **portão de qualidade por rodada** (14 checagens
+Panorama: **107 testes em 7 arquivos**, mais o **portão de qualidade por rodada** (14 checagens
 críticas), que é um mecanismo diferente e complementar — ver §5.8.
 
 ---
@@ -76,7 +76,7 @@ invariante de otimalidade `VPL(solver) ≥ VPL(build-all)`.
 Este é o teste que decide se uma refatoração foi neutra. Atualizar o golden é uma decisão
 consciente — ver `04-testes-executar.md` §4.6.
 
-## 5.6 `test_producao.py` — a camada de produção (50 testes)
+## 5.6 `test_producao.py` — a camada de produção (64 testes)
 
 Nenhum precisa de banco. Cobrem os bugs mais caros encontrados na revisão do pacote.
 
@@ -135,7 +135,7 @@ fim, e os dois ramos de saída — `FALHOU_QUALIDADE` **não publica**, e erro t
 - **Falha ao notificar não derruba a publicação** — a notificação é pós-commit; o dado já está
   gravado quando ela roda.
 
-### Idempotência da cópia em blob (10 testes)
+### Idempotência da cópia em blob (24 testes)
 
 O `DELETE ... WHERE run_id` tornava a rodada idempotente no Postgres, e a documentação
 generalizava isso para "tudo é idempotente". O blob não era: a gravação via Spark era
@@ -159,6 +159,25 @@ bastava a rodada falhar depois dele para o parquet ficar em dobro — e quem seg
 - **`salvar_delta` substitui a rodada por padrão** — o default era `modo="append"`, o mesmo
   defeito na API que a documentação recomenda para o Databricks. `modo` explícito ainda dá
   append cru a quem pedir.
+
+E o que a revisão do próprio conserto encontrou — a substituição usa o `run_id` como
+**caminho** e como **literal SQL**, e ele vem do backend numa coluna `text` sem gramática:
+
+- **`run_id` hostil é recusado** — `r1' OR run_id <> 'r1` fecharia o literal do
+  `replaceWhere` e casaria com **todas** as rodadas: o `overwrite` levaria a tabela Delta
+  inteira, o que seria pior que o bug original, que só duplicava. `..`/`/` desviariam o
+  diretório apagado, e espaço/`=` fariam a pasta real ter outro nome (o Spark escapa valor
+  de partição ao gravar) — com a substituição virando no-op e a duplicação voltando calada.
+- **`run_id` normal continua passando**, e **`novo_run_id()` passa na própria guarda** —
+  trava a coerência entre gerador e validador.
+- **Dois `run_id` no mesmo conjunto é erro** — "substituir a rodada" não tem significado:
+  apagaria duas partições numa chamada, ou poria as linhas de uma dentro da pasta da outra.
+  O portão já barra isso antes de publicar, mas `salvar` é API pública.
+- **Coluna `run_id` toda nula é erro** — antes caía num fallback que virava `run_id = ''`,
+  append disfarçado de substituição.
+- **Falha ao consultar o catálogo propaga** — engolir a exceção e responder "não existe"
+  escolhia o `append`, ou seja, a duplicação de volta em silêncio justo quando o metastore
+  está com problema. Só a ausência da API (Spark antigo) ainda vira "não existe".
 
 ## 5.7 `test_publicacao_postgres.py` — Postgres de verdade (12 testes)
 

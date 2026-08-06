@@ -28,8 +28,8 @@ Se você não vai rodar o pipeline, o mínimo para a suíte é:
 
 ```
 $ python -m pytest tests/
-83 collected
-80 passed, 13 skipped in 2.9s
+107 collected
+94 passed, 13 skipped in 2.9s
 ```
 
 | Arquivo | Testes |
@@ -39,7 +39,7 @@ $ python -m pytest tests/
 | `test_classe.py` | 7 |
 | `test_derivadas.py` | 2 |
 | `test_regressao_golden.py` | 4 |
-| `test_producao.py` | 50 |
+| `test_producao.py` | 64 |
 | `test_publicacao_postgres.py` | 12 |
 
 **Os 13 skips são esperados**, não são falha:
@@ -53,9 +53,9 @@ $ python -m pytest tests/
 
 | Ambiente | Resultado | Quem pula a mais |
 |---|---|---|
-| completo | **80 passed, 13 skipped** | — |
-| sem `ortools` | 69 passed, **24 skipped** | 5 marcados `solver` + 7 de `rodar()`, que usa o CP-SAT |
-| sem `matplotlib` | 70 passed, **23 skipped** | 10 de `test_producao.py` — a materialização importa o `dashboard` |
+| completo | **94 passed, 13 skipped** | — |
+| sem `ortools` | 83 passed, **24 skipped** | 5 marcados `solver` + 7 de `rodar()`, que usa o CP-SAT — e o skip da suíte legada vira skip de solver, então sobem 11 e não 12 |
+| sem `matplotlib` | 84 passed, **23 skipped** | 10 de `test_producao.py` — a materialização importa o `dashboard` |
 
 **Nenhum skip é aceitável em vermelho:** se um teste *falhar* em vez de pular, é bug.
 
@@ -225,8 +225,8 @@ Rodam em qualquer sessão (local, CI, Colab) sem banco externo.
 | Sintoma | Causa | Solução |
 |---|---|---|
 | `ModuleNotFoundError: No module named 'otimizador'` | rodou de fora da raiz do projeto | rode da pasta que tem o `main.py` e o `pytest.ini`; `tests/_helpers.py` insere essa raiz no `sys.path` |
-| `ModuleNotFoundError: matplotlib` | dependência do `dashboard_otimizador_v2` | `pip install matplotlib` (já está no `requirements-prod.txt`); sem ele, 9 testes **pulam** em vez de falhar |
-| 12 pulando com "OR-Tools indisponivel" / "rodar() usa o CP-SAT" | `ortools` ausente | `pip install ortools` |
+| `ModuleNotFoundError: matplotlib` | dependência do `dashboard_otimizador_v2` | `pip install matplotlib` (já está no `requirements-prod.txt`); sem ele, 10 testes **pulam** em vez de falhar |
+| 12 pulando com "OR-Tools indisponivel" (5) / "rodar() usa o CP-SAT" (7) | `ortools` ausente | `pip install ortools` |
 | 12 pulando com "defina OTIMIZADOR_PG_TESTE" | comportamento esperado | §4.4 |
 | 1 pulando com "suite legada ausente" | comportamento esperado | §4.2 |
 | Golden falhou sem você mexer no motor | versão de pandas/numpy mudou o arredondamento | investigue **antes** de atualizar o golden |
