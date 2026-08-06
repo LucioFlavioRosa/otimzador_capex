@@ -295,19 +295,42 @@ commitados. Não é preciso reconsultar o status antes de ler.
 
 ## 2.7 Idempotência e retry — o que dá para assumir
 
-**Reprocessar o mesmo `run_id` é seguro.** A publicação apaga a rodada anterior
-(`DELETE FROM otim_meta WHERE run_id = ...`) e o `ON DELETE CASCADE` remove todos os detalhes,
-antes de regravar. Vale também para o diagnóstico e o status (upsert).
+**Reprocessar o mesmo `run_id` é seguro — enquanto a rodada não tiver publicado.** A
+publicação apaga a rodada anterior (`DELETE FROM otim_meta WHERE run_id = ...`) e o
+`ON DELETE CASCADE` remove todos os detalhes, antes de regravar. Vale também para o
+diagnóstico, para o status (upsert) e para a cópia congelada em blob, que substitui a
+partição `run_id=<rid>` em vez de acrescentar a ela.
 
-Consequências para o backend:
+### A regra do `run_id`
 
-- **Retry é livre.** Job que morreu no meio, cluster reiniciado, timeout de rede: basta
-  disparar o mesmo `run_id` de novo.
+**Um `run_id` congela na primeira publicação bem-sucedida.**
+
+| `controle.run_status` | reexecutar com o mesmo `run_id` |
+|---|---|
+| `PENDENTE`, `RODANDO`, `ERRO`, `FALHOU_QUALIDADE`, `CANCELADA` | **pode** — é o retry técnico |
+| `SUCESSO` | **não** — gere um `run_id` novo, e recuse o pedido (`409`) |
+
+A condição é o `run_status`, e não a intenção de quem dispara, porque a publicação é
+atômica: `public.otim_*` e `run_status = SUCESSO` entram na mesma transação. Então "já
+foi publicado" é fato consultável, não julgamento.
+
+O motivo não é o cache do front (isso um refresh resolve) — é a **auditoria**. O job lê o
+cadastro no instante da execução, então os mesmos parâmetros, depois de uma correção no
+cadastro, produzem outro plano; republicando sob o mesmo id, o `DELETE`+`INSERT` apaga o
+resultado que alguém aprovou em reunião, e o `blob_uri` daquela rodada passa a apontar
+para outra coisa. Rodada nova é rodada nova.
+
+Para a reexecução não virar uma rodada solta no histórico, guarde o id de origem na
+`run_request` (campo `reprocessa_de`, nulo na primeira rodada). É o que permite ao front
+rotular "reprocessamento de `run_...`" e comparar antes/depois.
+
+Demais consequências para o backend:
+
+- **Retry é livre** dentro da regra acima. Job que morreu no meio, cluster reiniciado,
+  timeout de rede: dispare o mesmo `run_id` de novo.
 - **Um `run_id` = uma rodada.** `otim_meta` nunca tem duas linhas com o mesmo `run_id`.
 - **Publicar e marcar `SUCESSO` é uma transação só.** Não existe o estado "dados publicados
   mas status `RODANDO`". Se o commit falhar, nada foi publicado e o status não avançou.
-- **Rodada nova exige `run_id` novo.** Reusar um `run_id` para outros parâmetros **apaga** o
-  resultado anterior. Se o histórico importa, gere um id por execução.
 
 ---
 

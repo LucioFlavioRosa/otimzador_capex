@@ -522,3 +522,244 @@ def test_rodar_usa_nome_unico_para_o_snapshot(job_dublado):
     J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
     assert vistos["snapshot_para"] != primeiro, "nome do snapshot nao e unico por execucao"
     assert "run_teste" in vistos["snapshot_para"], "o run_id some do nome e atrapalha o diagnostico"
+
+
+# ------------------------------------------- idempotencia da copia em blob
+def test_regravar_a_mesma_rodada_substitui_a_particao(tmp_path):
+    """Reexecutar um `run_id` nao pode DUPLICAR a copia congelada.
+
+    O `DELETE ... WHERE run_id` da publicacao no Postgres tornava a rodada
+    idempotente daquele lado, e a documentacao dizia "tudo e idempotente" — mas o
+    blob nao era: a gravacao via Spark era `mode("append")` particionada por
+    `run_id`, entao o retry do job acrescentava arquivos DENTRO da particao em vez
+    de troca-la. Como o blob e escrito ANTES da transacao do Postgres, ate um retry
+    de rodada que falhou depois do blob ja duplicava. Quem seguisse o `blob_uri`
+    meses depois encontraria o parquet com as linhas em dobro.
+    """
+    from otimizador.infraestrutura import persistencia as P
+
+    tabs = {"run_ano": pd.DataFrame({"run_id": ["r1"] * 3, "ano": [2026, 2027, 2028]})}
+    P.salvar(tabs, str(tmp_path), verbose=False)
+    P.salvar(tabs, str(tmp_path), verbose=False)
+
+    lido = P.carregar(str(tmp_path))["run_ano"]
+    assert len(lido) == 3, f"a rodada foi duplicada: {len(lido)} linhas para 3 gravadas"
+
+
+def test_regravar_nao_deixa_o_formato_antigo_convivendo(tmp_path):
+    """`carregar()` le TUDO que estiver na pasta da particao. Se uma execucao caiu no
+    fallback csv e a seguinte gravou parquet, sobrescrever `dados.parquet` nao basta —
+    os dois arquivos coexistiriam e a rodada seria lida duas vezes."""
+    import os
+    from otimizador.infraestrutura import persistencia as P
+
+    tabs = {"run_ano": pd.DataFrame({"run_id": ["r1"] * 3, "ano": [2026, 2027, 2028]})}
+    P.salvar(tabs, str(tmp_path), formato="csv", verbose=False)
+    P.salvar(tabs, str(tmp_path), formato="parquet", verbose=False)
+
+    # Um arquivo, e nao "o arquivo tal": sem engine de parquet instalada o `salvar`
+    # cai no fallback csv, e o que precisa valer nos dois casos e a AUSENCIA de
+    # convivencia — dois arquivos na particao seriam duas leituras da mesma rodada.
+    pasta = os.path.join(str(tmp_path), "run_ano", "run_id=r1")
+    assert len(os.listdir(pasta)) == 1, os.listdir(pasta)
+    assert len(P.carregar(str(tmp_path))["run_ano"]) == 3
+
+
+def test_outras_rodadas_ficam_intactas(tmp_path):
+    """Substituir a particao de uma rodada nao pode encostar nas demais — e a diferenca
+    entre 'idempotente' e 'destrutivo'."""
+    from otimizador.infraestrutura import persistencia as P
+
+    P.salvar({"run_ano": pd.DataFrame({"run_id": ["r1"] * 2, "ano": [2026, 2027]})},
+             str(tmp_path), verbose=False)
+    P.salvar({"run_ano": pd.DataFrame({"run_id": ["r2"] * 2, "ano": [2026, 2027]})},
+             str(tmp_path), verbose=False)
+    P.salvar({"run_ano": pd.DataFrame({"run_id": ["r1"] * 2, "ano": [2026, 2027]})},
+             str(tmp_path), verbose=False)
+
+    lido = P.carregar(str(tmp_path))["run_ano"]
+    assert sorted(lido.run_id.tolist()) == ["r1", "r1", "r2", "r2"], lido.run_id.tolist()
+
+
+def test_a_particao_sai_do_dado_e_nao_do_run_meta(tmp_path):
+    """A pasta e escolhida pelo `run_id` do PROPRIO df. Sem `run_meta` no conjunto, a
+    versao anterior inventava um id novo (`novo_run_id()`) e gravava numa particao que
+    nao correspondia ao dado — cada regravacao criava outra pasta, e `carregar()` somava
+    todas elas."""
+    from otimizador.infraestrutura import persistencia as P
+
+    tabs = {"run_ano": pd.DataFrame({"run_id": ["r9"] * 2, "ano": [2026, 2027]})}
+    P.salvar(tabs, str(tmp_path), verbose=False)   # sem run_meta de proposito
+    P.salvar(tabs, str(tmp_path), verbose=False)
+
+    import os
+    assert os.listdir(os.path.join(str(tmp_path), "run_ano")) == ["run_id=r9"]
+    assert len(P.carregar(str(tmp_path))["run_ano"]) == 2
+
+
+# ------------------------------------------- idempotencia no ramo Spark (producao)
+class _EscritorDuble:
+    """Registra a chamada de escrita em vez de gravar. E o que interessa testar:
+    QUAL escrita o `salvar` escolhe — o dado em si ja e coberto pelo ramo pandas."""
+
+    def __init__(self, reg):
+        self.reg = reg
+
+    def format(self, f):
+        self.reg["format"] = f
+        return self
+
+    def mode(self, m):
+        self.reg["mode"] = m
+        return self
+
+    def option(self, k, v):
+        self.reg["options"][k] = v
+        return self
+
+    def partitionBy(self, *cols):
+        self.reg["partitionBy"] = list(cols)
+        return self
+
+    def save(self, caminho):
+        self.reg["save"] = caminho
+
+    def saveAsTable(self, alvo):
+        self.reg["saveAsTable"] = alvo
+
+
+def _spark_duble(existentes=(), tabelas=()):
+    """SparkSession de mentira: escrita registrada e um FileSystem Hadoop de mentira,
+    para observar o que e apagado antes de gravar."""
+    import types
+
+    estado = {"escritas": [], "apagados": []}
+
+    class _FS:
+        def exists(self, p):
+            return str(p) in existentes
+
+        def delete(self, p, recursivo):
+            estado["apagados"].append(str(p))
+            return True
+
+    class _Path:
+        def __init__(self, s):
+            self.s = s
+
+        def __str__(self):
+            return self.s
+
+        def getFileSystem(self, conf):
+            return _FS()
+
+    def cria_df(df):
+        reg = {"options": {}}
+        estado["escritas"].append(reg)
+        return types.SimpleNamespace(write=_EscritorDuble(reg))
+
+    ns = types.SimpleNamespace
+    sp = ns(
+        createDataFrame=cria_df,
+        catalog=ns(tableExists=lambda alvo: alvo in tabelas),
+        _jvm=ns(org=ns(apache=ns(hadoop=ns(fs=ns(Path=_Path))))),
+        _jsc=ns(hadoopConfiguration=lambda: None),
+    )
+    return sp, estado
+
+
+def test_spark_apaga_a_particao_da_rodada_antes_de_acrescentar(monkeypatch):
+    """O caminho de PRODUCAO: `publicar_blob` -> `salvar(formato="parquet")` com destino
+    `abfss://`. Ate 2026-08-06 era `mode("append")` particionado por `run_id` — sem
+    apagar nada antes, o que duplica o parquet a cada reexecucao do mesmo `run_id`."""
+    from otimizador.infraestrutura import persistencia as P
+
+    raiz = "abfss://c@x.dfs.core.windows.net/otim"
+    particao = f"{raiz}/run_ano/run_id=r1"
+    sp, estado = _spark_duble(existentes=(particao,))  # a rodada JA foi gravada antes
+    monkeypatch.setattr(P, "_spark", lambda: sp)
+    tabs = {"run_ano": pd.DataFrame({"run_id": ["r1"] * 3, "ano": [2026, 2027, 2028]})}
+    P.salvar(tabs, raiz, verbose=False)
+
+    assert estado["apagados"] == [particao]
+    (esc,) = estado["escritas"]
+    assert esc["partitionBy"] == ["run_id"]
+    # `append` DEPOIS de apagar, e nao `overwrite`: overwrite sem particao dinamica
+    # levaria a pasta inteira, com as outras rodadas dentro.
+    assert esc["mode"] == "append"
+
+
+def test_spark_sem_particao_nao_apaga_nada(monkeypatch):
+    """`particionar_por_run=False` nao tem particao a substituir. O risco aqui seria o
+    inverso do bug: apagar `<base>` inteiro, levando junto todas as rodadas."""
+    from otimizador.infraestrutura import persistencia as P
+
+    sp, estado = _spark_duble()
+    monkeypatch.setattr(P, "_spark", lambda: sp)
+    P.salvar({"run_ano": pd.DataFrame({"run_id": ["r1"], "ano": [2026]})},
+             "abfss://c@x/otim", particionar_por_run=False, verbose=False)
+
+    assert estado["apagados"] == []
+    (esc,) = estado["escritas"]
+    assert esc["mode"] == "append" and "partitionBy" not in esc
+
+
+def test_delta_substitui_pelo_log_e_nunca_apagando_pasta(monkeypatch):
+    """Num Delta, apagar `run_id=<rid>/` corromperia o log (os arquivos continuariam
+    referenciados). Quem substitui a rodada tem de ser o proprio Delta."""
+    from otimizador.infraestrutura import persistencia as P
+
+    base = "abfss://c@x/otim/run_ano"
+    sp, estado = _spark_duble(existentes=(f"{base}/_delta_log",))
+    monkeypatch.setattr(P, "_spark", lambda: sp)
+    P.salvar({"run_ano": pd.DataFrame({"run_id": ["r1"] * 2, "ano": [2026, 2027]})},
+             "abfss://c@x/otim", formato="delta", verbose=False)
+
+    assert estado["apagados"] == [], "nao se apaga pasta de Delta"
+    (esc,) = estado["escritas"]
+    assert esc["mode"] == "overwrite"
+    assert esc["options"]["replaceWhere"] == "run_id = 'r1'"
+    assert esc["partitionBy"] == ["run_id"]
+
+
+def test_delta_novo_e_criado_com_append(monkeypatch):
+    """`replaceWhere` sobre tabela que ainda nao existe falha. Na primeira gravacao nao
+    ha o que substituir."""
+    from otimizador.infraestrutura import persistencia as P
+
+    sp, estado = _spark_duble()  # sem _delta_log
+    monkeypatch.setattr(P, "_spark", lambda: sp)
+    P.salvar({"run_ano": pd.DataFrame({"run_id": ["r1"], "ano": [2026]})},
+             "abfss://c@x/otim", formato="delta", verbose=False)
+
+    (esc,) = estado["escritas"]
+    assert esc["mode"] == "append" and "replaceWhere" not in esc["options"]
+
+
+def test_salvar_delta_substitui_a_rodada_por_padrao(monkeypatch):
+    """`salvar_delta` tinha `modo="append"` no default — mesmo defeito, na API que a
+    documentacao recomenda para o Databricks."""
+    from otimizador.infraestrutura import persistencia as P
+
+    sp, estado = _spark_duble(tabelas=("cat.otim.run_ano",))
+    monkeypatch.setattr(P, "_spark", lambda: sp)
+    P.salvar_delta({"run_ano": pd.DataFrame({"run_id": ["r1"] * 2, "ano": [2026, 2027]})},
+                   "cat.otim", verbose=False)
+
+    (esc,) = estado["escritas"]
+    assert esc["mode"] == "overwrite"
+    assert esc["options"]["replaceWhere"] == "run_id = 'r1'"
+    assert esc["saveAsTable"] == "cat.otim.run_ano"
+
+
+def test_salvar_delta_aceita_modo_explicito(monkeypatch):
+    """Quem quiser append cru continua podendo — so nao ganha isso sem pedir."""
+    from otimizador.infraestrutura import persistencia as P
+
+    sp, estado = _spark_duble(tabelas=("cat.otim.run_ano",))
+    monkeypatch.setattr(P, "_spark", lambda: sp)
+    P.salvar_delta({"run_ano": pd.DataFrame({"run_id": ["r1"], "ano": [2026]})},
+                   "cat.otim", modo="append", verbose=False)
+
+    (esc,) = estado["escritas"]
+    assert esc["mode"] == "append" and "replaceWhere" not in esc["options"]

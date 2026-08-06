@@ -264,8 +264,21 @@ SELECT params_extra FROM public.otim_meta WHERE run_id = :run;
 
 ### Reprocessar
 
-Dispare o **mesmo `run_id`** de novo. Tudo é idempotente: a publicação apaga e regrava, o
-diagnóstico apaga e regrava, o status é upsert. Não é preciso limpar nada antes.
+**Só enquanto a rodada não tiver publicado.** Consulte `controle.run_status`:
+
+- diferente de `SUCESSO` (`PENDENTE`, `RODANDO`, `ERRO`, `FALHOU_QUALIDADE`, `CANCELADA`) —
+  dispare o **mesmo `run_id`** de novo. Tudo é idempotente e não é preciso limpar nada antes:
+  a publicação apaga e regrava, o diagnóstico apaga e regrava, o status é upsert, e o blob
+  substitui a partição `run_id=<rid>`;
+- `SUCESSO` — **gere um `run_id` novo**. Republicar apagaria um resultado que já foi visto e
+  possivelmente aprovado, e a cópia congelada daquela rodada junto. Ver `02-integracao-backend.md`
+  §2.7.
+
+> Até 2026-08-06 a idempotência valia só para o Postgres: a gravação no blob era
+> `mode("append")` particionada por `run_id`, então o retry **duplicava** as linhas do parquet
+> em vez de substituí-las. Como o blob é escrito antes da transação do Postgres, bastava a
+> rodada falhar depois dele. Corrigido em `persistencia.salvar` (apaga a partição antes de
+> gravar) e coberto por `tests/test_producao.py`.
 
 ### Apagar uma rodada
 
@@ -305,8 +318,9 @@ Comece por aí.
   `True`, a DDL inteira roda dentro da transação de publicação a cada rodada: toma locks, pode
   bloquear leituras do front, e `CREATE TABLE IF NOT EXISTS` **não** corrige coluna nova — o
   `INSERT` é que falha, com erro obscuro. Mudança de esquema é migration.
-- **Não reutilize `run_id` para parâmetros diferentes.** Republicar **apaga** o resultado
-  anterior.
+- **Não reutilize um `run_id` que já publicou (`run_status = SUCESSO`).** Republicar **apaga**
+  o resultado anterior — inclusive quando os parâmetros são os mesmos, porque o cadastro pode
+  ter mudado no meio. Retry só antes do `SUCESSO`.
 - **Não rode duas vezes o mesmo `run_id` em paralelo.** Idempotência protege repetição
   sequencial, não concorrência: dois jobs publicando o mesmo `run_id` ao mesmo tempo podem
   deadlock no `DELETE`.

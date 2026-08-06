@@ -29,7 +29,7 @@ Se você não vai rodar o pipeline, o mínimo para a suíte é:
 ```
 $ python -m pytest tests/
 83 collected
-70 passed, 13 skipped in 2.9s
+80 passed, 13 skipped in 2.9s
 ```
 
 | Arquivo | Testes |
@@ -39,7 +39,7 @@ $ python -m pytest tests/
 | `test_classe.py` | 7 |
 | `test_derivadas.py` | 2 |
 | `test_regressao_golden.py` | 4 |
-| `test_producao.py` | 40 |
+| `test_producao.py` | 50 |
 | `test_publicacao_postgres.py` | 12 |
 
 **Os 13 skips são esperados**, não são falha:
@@ -53,9 +53,9 @@ $ python -m pytest tests/
 
 | Ambiente | Resultado | Quem pula a mais |
 |---|---|---|
-| completo | **70 passed, 13 skipped** | — |
-| sem `ortools` | 59 passed, **24 skipped** | 5 marcados `solver` + 7 de `rodar()`, que usa o CP-SAT |
-| sem `matplotlib` | 60 passed, **23 skipped** | 10 de `test_producao.py` — a materialização importa o `dashboard` |
+| completo | **80 passed, 13 skipped** | — |
+| sem `ortools` | 69 passed, **24 skipped** | 5 marcados `solver` + 7 de `rodar()`, que usa o CP-SAT |
+| sem `matplotlib` | 70 passed, **23 skipped** | 10 de `test_producao.py` — a materialização importa o `dashboard` |
 
 **Nenhum skip é aceitável em vermelho:** se um teste *falhar* em vez de pular, é bug.
 
@@ -158,7 +158,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - run: pip install -r requirements-prod.txt
-      - run: pytest -q tests/          # 70 passed, 13 skipped
+      - run: pytest -q tests/          # 80 passed, 13 skipped
 
   com-postgres:
     runs-on: ubuntu-latest

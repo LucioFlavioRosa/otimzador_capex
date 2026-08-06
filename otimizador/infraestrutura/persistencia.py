@@ -34,6 +34,7 @@ import hashlib as _hl
 import json as _js
 import math as _math
 import os as _os
+import shutil as _shutil
 import uuid as _uuid
 
 import pandas as pd
@@ -691,6 +692,57 @@ def _spark():
         return None
 
 
+def _rodadas_no_df(df, padrao):
+    """Os `run_id` presentes no df — as particoes que esta gravacao substitui.
+
+    Sai do PROPRIO df, e nao do `run_meta` do conjunto, porque e o dado gravado que
+    determina em qual particao ele cai: usar um id de outra origem apagaria a
+    particao errada (ou nenhuma).
+    """
+    if "run_id" not in df.columns or len(df) == 0:
+        return [str(padrao)]
+    vistos = [str(v) for v in pd.unique(df["run_id"].dropna())]
+    return vistos or [str(padrao)]
+
+
+def _apagar_particoes_spark(sp, base, rids):
+    """Apaga `<base>/run_id=<rid>/` no storage do Spark (ADLS, DBFS, S3, local).
+
+    E o equivalente do `DELETE FROM ... WHERE run_id = %s` que a publicacao no
+    Postgres faz antes de inserir. Sem ele, `mode("append")` acrescenta arquivos
+    NOVOS dentro da particao — e reexecutar a mesma rodada duplicaria o parquet em
+    vez de substitui-lo. Apagar diretorio so vale para formato de arquivo; num Delta
+    isso corromperia o log da tabela, e por isso o Delta tem caminho proprio.
+    """
+    jvm = sp._jvm
+    conf = sp._jsc.hadoopConfiguration()
+    for rid in rids:
+        p = jvm.org.apache.hadoop.fs.Path(f"{base}/run_id={rid}")
+        fs = p.getFileSystem(conf)
+        if fs.exists(p):
+            fs.delete(p, True)
+
+
+def _tabela_existe(sp, alvo):
+    """A tabela Delta gerenciada ja existe? Na duvida diz que NAO, e o caminho de
+    criacao (append puro) e escolhido — errar para o outro lado faria a primeira
+    gravacao falhar num `replaceWhere` sobre tabela inexistente."""
+    try:
+        return bool(sp.catalog.tableExists(alvo))
+    except Exception:
+        return False
+
+
+def _delta_existe(sp, base):
+    """Ha um Delta gravado em `base`? Decide entre criar e substituir a particao."""
+    try:
+        jvm = sp._jvm
+        p = jvm.org.apache.hadoop.fs.Path(f"{str(base).rstrip('/')}/_delta_log")
+        return p.getFileSystem(sp._jsc.hadoopConfiguration()).exists(p)
+    except Exception:
+        return False
+
+
 def salvar(tabs, destino, formato="parquet", particionar_por_run=True, verbose=True):
     """Grava as tabelas em `destino`, uma pasta por tabela.
 
@@ -701,6 +753,14 @@ def salvar(tabs, destino, formato="parquet", particionar_por_run=True, verbose=T
 
     Com Spark ativo (Databricks) e destino remoto, escreve via Spark. Sem Spark,
     escreve com pandas (parquet ou csv) — bom para testar no Colab.
+
+    IDEMPOTENTE POR RODADA: gravar duas vezes o mesmo `run_id` SUBSTITUI a particao
+    daquela rodada, nao acrescenta. E o que faz o retry do job ser seguro — e sem
+    isso o `blob_uri` da auditoria passaria a apontar para linhas em dobro. Rodadas
+    diferentes nunca se tocam, porque cada uma e uma particao.
+
+    A garantia depende de `particionar_por_run=True` (o padrao). Com ela desligada
+    nao existe particao a substituir, e cada gravacao so pode acrescentar.
     """
     sp = _spark()
     remoto = str(destino).startswith(("abfss://", "wasbs://", "s3://", "gs://", "dbfs:/"))
@@ -712,13 +772,36 @@ def salvar(tabs, destino, formato="parquet", particionar_por_run=True, verbose=T
         base = str(destino).rstrip("/") + "/" + nome
         if sp is not None and (remoto or formato == "delta"):
             sdf = sp.createDataFrame(df)
-            w = sdf.write.mode("append").format("delta" if formato == "delta" else formato)
-            if particionar_por_run and "run_id" in df.columns:
-                w = w.partitionBy("run_id")
-            w.save(base)
+            fmt = "delta" if formato == "delta" else formato
+            particiona = particionar_por_run and "run_id" in df.columns
+            w = sdf.write.format(fmt)
+            if not particiona:
+                w.mode("append").save(base)
+            elif fmt == "delta":
+                rids = _rodadas_no_df(df, rid)
+                if _delta_existe(sp, base):
+                    # `replaceWhere` e o DELETE+INSERT do Delta: troca so as linhas
+                    # desta rodada e deixa as outras intactas. Se a condicao nao for
+                    # aceita, ele FALHA — que e o que se quer de um caminho de
+                    # escrita, em vez de sobrescrever a tabela inteira em silencio.
+                    cond = " OR ".join(f"run_id = '{r}'" for r in rids)
+                    w = w.mode("overwrite").option("replaceWhere", cond)
+                else:
+                    w = w.mode("append")  # primeira gravacao: nao ha o que substituir
+                w.partitionBy("run_id").save(base)
+            else:
+                _apagar_particoes_spark(sp, base, _rodadas_no_df(df, rid))
+                w.mode("append").partitionBy("run_id").save(base)
             escritos.append((nome, base, len(df)))
         else:
-            pasta = base if not particionar_por_run else f"{base}/run_id={rid}"
+            rid_tab = _rodadas_no_df(df, rid)[0]
+            pasta = base if not particionar_por_run else f"{base}/run_id={rid_tab}"
+            if particionar_por_run and _os.path.isdir(pasta):
+                # Mesma regra do lado Spark: a particao da rodada e SUBSTITUIDA.
+                # Nao basta reescrever `dados.parquet` por cima: se a execucao
+                # anterior tiver caido no fallback e deixado um `dados.csv`, os dois
+                # conviveriam na pasta — e `carregar()` le TUDO que estiver nela.
+                _shutil.rmtree(pasta)
             _os.makedirs(pasta, exist_ok=True)
             if formato == "csv":
                 cam = f"{pasta}/dados.csv"
@@ -740,9 +823,17 @@ def salvar(tabs, destino, formato="parquet", particionar_por_run=True, verbose=T
     return escritos
 
 
-def salvar_delta(tabs, schema, modo="append", particionar_por_run=True, verbose=True):
+def salvar_delta(tabs, schema, modo=None, particionar_por_run=True, verbose=True):
     """Databricks: grava como TABELAS Delta gerenciadas em `schema`
-    (ex.: 'principal.otimizador'). Os arquivos ficam no storage do catalogo."""
+    (ex.: 'principal.otimizador'). Os arquivos ficam no storage do catalogo.
+
+    `modo=None` (padrao) SUBSTITUI a particao da rodada, via `replaceWhere`. Para
+    rodadas novas isso equivale a acrescentar — nenhuma linha casa com a condicao —
+    e para uma rodada ja gravada troca as linhas dela sem tocar nas outras. Era
+    `modo="append"`, que fazia reexecutar o mesmo `run_id` DUPLICAR as linhas.
+
+    `modo` explicito volta ao modo cru do Spark, para quem quiser mesmo append.
+    """
     sp = _spark()
     if sp is None:
         raise RuntimeError("Spark nao encontrado — use salvar() para gravar em arquivo.")
@@ -752,8 +843,16 @@ def salvar_delta(tabs, schema, modo="append", particionar_por_run=True, verbose=
             continue
         alvo = f"{schema}.{nome}"
         sdf = sp.createDataFrame(df)
-        w = sdf.write.mode(modo).format("delta").option("mergeSchema", "true")
-        if particionar_por_run and "run_id" in df.columns:
+        particiona = particionar_por_run and "run_id" in df.columns
+        w = sdf.write.format("delta").option("mergeSchema", "true")
+        if modo is not None:
+            w = w.mode(modo)
+        elif particiona and _tabela_existe(sp, alvo):
+            cond = " OR ".join(f"run_id = '{r}'" for r in _rodadas_no_df(df, ""))
+            w = w.mode("overwrite").option("replaceWhere", cond)
+        else:
+            w = w.mode("append")  # tabela ainda nao existe: nao ha o que substituir
+        if particiona:
             w = w.partitionBy("run_id")
         w.saveAsTable(alvo)
         feitas.append((alvo, len(df)))
