@@ -107,9 +107,12 @@ rodar(run_id=dbutils.widgets.get("run_id"),
 
 - **Status:** `SELECT status, erro, atualizado_em FROM controle.run_status WHERE run_id = '...';`
 - **Por que falhou a qualidade:** `SELECT * FROM controle.run_diagnostico WHERE run_id = '...' AND ok = false;`
-- **Reprocessar:** rode o mesmo `run_id` de novo — tudo é idempotente (apaga e regrava). Isso
-  depende de `materializar(..., run_id=run_id)`: é o `run_id` da rodada que liga `controle.*` a
-  `public.otim_*` e é a chave do `DELETE` da publicação.
+- **Reprocessar:** só enquanto `run_status` **não** for `SUCESSO` — aí rode o mesmo `run_id` de
+  novo, que tudo é idempotente (Postgres apaga e regrava; blob substitui a partição da rodada).
+  Depois do `SUCESSO`, gere um `run_id` novo: republicar apaga o resultado que já foi visto, e o
+  cadastro pode ter mudado no meio. Isso depende de `materializar(..., run_id=run_id)`: é o
+  `run_id` da rodada que liga `controle.*` a `public.otim_*` e é a chave do `DELETE` da
+  publicação e da partição do blob.
 - **Publicação e status entram no mesmo commit:** `public.otim_*` + `controle.run_status =
   SUCESSO` são uma transação só, então o estado observável nunca fica dessincronizado do dado.
 
@@ -120,7 +123,7 @@ rodar(run_id=dbutils.widgets.get("run_id"),
 
 ```bash
 pip install -r requirements-prod.txt
-pytest tests/            # 83 testes: 70 passed, 13 skipped (os de solver/Postgres pulam sozinhos)
+pytest tests/            # 107 testes: 94 passed, 13 skipped (os de solver/Postgres pulam sozinhos)
 ```
 
 `tests/test_producao.py` cobre a camada de produção (tradução de `run_request.params`, portão
