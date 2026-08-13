@@ -24,8 +24,16 @@ from _helpers import BANK_CTS, engine, silent, solver_or_skip
 ORC_APERTADO = {2026: 2e6, 2027: 2e6, 2028: 2e6, 2029: 2e6}
 
 
+#: Tempo da geracao de colunas, escolhido para ser IRREPETIVEL pelas fases: elas
+#: recebem fracoes de `TEMPO_FASES`, e nenhuma cai em 7s. E o discriminante — usar
+#: `num_search_workers` acoplaria o teste ao paralelismo, que pode mudar por motivo
+#: legitimo sem que o requisito real mude.
+TEMPO_COLUNAS = 7
+TEMPO_FASES = 40
+
+
 def _espiar(CP, cen, **kw):
-    """Roda o solver anotando `(workers, gap)` de cada chamada ao CP-SAT.
+    """Roda o solver anotando `(teto, gap)` de cada chamada ao CP-SAT.
 
     Envolver `Solve` e a unica forma de ver o que cada fase pediu: os solvers sao
     criados dentro de `resolver_por_sistema` e nao saem de la.
@@ -36,13 +44,14 @@ def _espiar(CP, cen, **kw):
     original = cp_model.CpSolver.Solve
 
     def espiao(self, model, *a, **k):
-        vistos.append((self.parameters.num_search_workers,
+        vistos.append((self.parameters.max_time_in_seconds,
                        self.parameters.relative_gap_limit))
         return original(self, model, *a, **k)
 
     cp_model.CpSolver.Solve = espiao
     try:
-        silent(CP.resolver_por_sistema, cen, max_time_s=30, workers=4, **kw)
+        silent(CP.resolver_por_sistema, cen, max_time_s=TEMPO_FASES, workers=4,
+               col_time_s=TEMPO_COLUNAS, **kw)
     finally:
         cp_model.CpSolver.Solve = original
     return vistos
@@ -113,6 +122,11 @@ def test_duas_execucoes_iguais_dao_o_MESMO_retorno():
         "duas execucoes identicas divergiram no VPL — o desempate nao esta "
         "determinando o plano"
     )
+    # LIMITE DESTE TESTE, dito aqui para ninguem confiar demais nele: num cenario
+    # sem empate real de cobertura ele passaria mesmo sem a fase 3, porque nao
+    # haveria dois planos entre os quais sortear. Ele detecta REGRESSAO (a fase 3
+    # sair, ou parar de determinar o plano); nao PROVA a ausencia de dispersao no
+    # caso grande, que so a medicao em unidade real mostra.
 
 
 @pytest.mark.solver
@@ -130,15 +144,17 @@ def test_gap_relativo_chega_a_todas_as_fases():
     # monta a materia-prima do master. Um gap ali mudaria as COLUNAS disponiveis,
     # e nao so o tempo de prova do plano final — efeito colateral por um caminho
     # que ninguem lembraria de olhar. O discriminante e o numero de threads.
-    fases = [g for w, g in vistos if w > 1]
-    colunas = [g for w, g in vistos if w == 1]
+    colunas = [g for t, g in vistos if t == pytest.approx(float(TEMPO_COLUNAS))]
+    fases = [g for t, g in vistos if t != pytest.approx(float(TEMPO_COLUNAS))]
 
     assert fases, "nenhuma fase rodou"
-    assert all(g == pytest.approx(0.02) for g in fases), (
-        f"alguma fase ficou sem o gap: {fases}"
-    )
     assert all(g == 0.0 for g in colunas), (
         f"o gap vazou para a geracao de colunas: {colunas}"
+    )
+    # As DUAS PRIMEIRAS fases ficam sem gap (prioridade absoluta); da fase 2 em
+    # diante ele vale. Ver `test_o_gap_NAO_alcanca_obrigatorias_nem_metas`.
+    assert any(g == pytest.approx(0.02) for g in fases), (
+        f"nenhuma fase recebeu o gap: {fases}"
     )
 
 
@@ -152,3 +168,53 @@ def test_o_default_do_gap_nao_muda_nada():
     CP = solver_or_skip()
     vistos = _espiar(CP, _cenario())
     assert all(g == 0.0 for _, g in vistos), f"o default vazou um gap: {vistos}"
+
+
+@pytest.mark.solver
+def test_o_gap_NAO_alcanca_obrigatorias_nem_metas():
+    """As duas primeiras fases sao PRIORIDADE ABSOLUTA e nao aceitam folga.
+
+    Um gap ali nao compra tempo, compra risco: com 2%, a fase 0 pode parar num
+    incumbente de 99 obrigatorias com bound 100 e travar `_obrig_floor(99)` — e dai
+    em diante o plano deixa uma obrigatoria de fora COMO SE ela nao coubesse no
+    orcamento. Medido: essas fases provam em ~1s mesmo com 67 cidades, entao nao ha
+    tempo a economizar nelas.
+
+    O mesmo raciocinio vale para `Mstar`, a meta travada pela fase 1.
+    """
+    CP = solver_or_skip()
+    vistos = _espiar(CP, _cenario(), gap_relativo=0.02)
+    fases = [(t, g) for t, g in vistos if t != pytest.approx(float(TEMPO_COLUNAS))]
+
+    # As fases absolutas sao reconheciveis pelo teto: 0,35 e 0,4 de `TEMPO_FASES`.
+    absolutas = [g for t, g in fases
+                 if t == pytest.approx(TEMPO_FASES * 0.35) or t == pytest.approx(TEMPO_FASES * 0.4)]
+    assert absolutas, "nao identifiquei as fases de prioridade absoluta"
+    assert all(g == 0.0 for g in absolutas), (
+        f"o gap alcancou obrigatorias/metas: {absolutas}"
+    )
+
+
+@pytest.mark.solver
+def test_o_desempate_nao_estica_o_teto_de_tempo():
+    """A fase 3 recebe o que SOBRA do teto, e nao mais um pedaco dele.
+
+    As fracoes historicas ja somavam 1,35x o `max_time_s` pedido. Somar mais 0,6
+    levaria a 1,95x — uma regressao operacional silenciosa para quem dimensionou o
+    job pelo numero que passa no parametro.
+    """
+    CP = solver_or_skip()
+    vistos = _espiar(CP, _cenario(), gap_relativo=0.02)
+    fases = [t for t, _ in vistos if t != pytest.approx(float(TEMPO_COLUNAS))]
+    teto = TEMPO_FASES * 1.35
+
+    # O QUE SE MEDE E O TETO DA ULTIMA FASE, e nao a soma dos tetos. Somar os tetos
+    # nao diz nada: eles sao limites por fase, e as anteriores costumam terminar bem
+    # antes do seu. A garantia esta na FORMA como o teto da fase 3 e calculado — ela
+    # recebe `teto_total - decorrido`, entao `decorrido + teto_fase_3 <= teto_total`
+    # por construcao. Se alguem a trocar por uma fracao propria, este numero passa do
+    # teto e o teste cai.
+    assert fases[-1] <= teto + 1e-6, (
+        f"a fase 3 pediu {fases[-1]:.1f}s, acima do teto total de {teto:.1f}s — "
+        f"ela deixou de receber o que sobra e virou mais um pedaco: {fases}"
+    )
