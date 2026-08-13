@@ -218,3 +218,42 @@ def test_o_desempate_nao_estica_o_teto_de_tempo():
         f"a fase 3 pediu {fases[-1]:.1f}s, acima do teto total de {teto:.1f}s — "
         f"ela deixou de receber o que sobra e virou mais um pedaco: {fases}"
     )
+
+
+@pytest.mark.solver
+def test_os_dois_gaps_sao_independentes():
+    """Cobertura e retorno tem folgas SEPARADAS, porque sao moedas diferentes.
+
+    `gap_relativo` afrouxa a cobertura e, com ela, o `C*` que a fase 3 trava — e
+    `C*` e a base de comparacao entre cenarios. `gap_retorno` nao mexe em `C*`: so
+    decide quanto tempo se gasta refinando o VPL dentro do que ja foi travado.
+
+    Medido em tres execucoes identicas com gap UNICO de 2%: `C*` variou entre
+    670.092, 670.193 e 673.202, e o VPL acompanhou na direcao contraria. Quem
+    compara cenarios quer o primeiro apertado; quem quer velocidade quer o segundo
+    folgado. Com um numero so, nao da para ter os dois.
+    """
+    CP = solver_or_skip()
+    vistos = _espiar(CP, _cenario(), gap_relativo=0.005, gap_retorno=0.05)
+    fases = [g for t, g in vistos if t != pytest.approx(float(TEMPO_COLUNAS))]
+
+    assert 0.005 in [pytest.approx(g) for g in fases], (
+        f"nenhuma fase recebeu o gap de COBERTURA: {fases}"
+    )
+    assert 0.05 in [pytest.approx(g) for g in fases], (
+        f"a fase de RETORNO nao recebeu o gap dela: {fases}"
+    )
+
+
+@pytest.mark.solver
+def test_gap_retorno_ausente_herda_o_da_cobertura():
+    """Quem chamava com um numero so continua funcionando igual."""
+    CP = solver_or_skip()
+    vistos = _espiar(CP, _cenario(), gap_relativo=0.02)
+    fases = [g for t, g in vistos if t != pytest.approx(float(TEMPO_COLUNAS))]
+    comgap = [g for g in fases if g > 0]
+
+    assert comgap, "nenhuma fase recebeu gap"
+    assert all(g == pytest.approx(0.02) for g in comgap), (
+        f"sem `gap_retorno`, todas as fases com folga usam o mesmo valor: {comgap}"
+    )

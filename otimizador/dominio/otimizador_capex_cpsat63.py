@@ -422,7 +422,7 @@ def _desconsidera_obrig_fora_janela(cen, verbose=True):
     return fora
 
 def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s=5, col_grid=12,
-                         gap_relativo=0.0):
+                         gap_relativo=0.0, gap_retorno=None):
     """Decomposicao por CIDADE.
     FASE 0 (prioridade ABSOLUTA): construir o MAXIMO de obras OBRIGATORIAS que couber no teto
     anual, ANTES de qualquer obra opcional. Esse piso e travado nas fases seguintes.
@@ -430,11 +430,21 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
     foco<0.95 -> ponderado.
     Se alguma obrigatoria nao couber no orcamento, avisa exatamente quais (sem estourar o teto).
 
-    gap_relativo: para a busca quando a solucao esta comprovadamente a menos de `gap_relativo`
-    do otimo (0.02 = 2%). 0.0 (default) mantem o comportamento historico: so para por prova
-    exata ou por relogio. Sem ele uma fase pode gastar o teto inteiro PROVANDO um plano que ja
-    tinha achado — medido numa unidade de 67 cidades: 339s de 720s, com o resultado final a
-    0,006% do limite superior provado."""
+    gap_relativo: folga da fase de COBERTURA (0.02 = 2%). 0.0 (default) mantem o comportamento
+    historico: so para por prova exata ou por relogio. Sem ele uma fase pode gastar o teto
+    inteiro PROVANDO um plano que ja tinha achado — medido numa unidade de 67 cidades: 339s de
+    720s, com o resultado final a 0,006% do limite superior provado.
+
+    gap_retorno: folga da fase de DESEMPATE POR RETORNO. `None` (default) usa o mesmo valor de
+    `gap_relativo`, preservando quem chamava so com um numero.
+
+    OS DOIS SAO MOEDAS DIFERENTES, e por isso sao dois. `gap_relativo` afrouxa a COBERTURA e,
+    com ela, o `C*` que a fase seguinte trava — e `C*` e a base de comparacao entre cenarios.
+    Medido em tres execucoes identicas com gap unico de 2%: `C*` variou entre 670.092, 670.193 e
+    673.202, e o VPL acompanhou na direcao contraria (181,70 / 175,02 / 171,56 Mi). Ja
+    `gap_retorno` nao mexe em `C*`: ele so decide quanto tempo se gasta refinando o VPL DENTRO
+    da cobertura ja travada. Quem compara cenarios quer o primeiro apertado; quem quer
+    velocidade quer o segundo folgado."""
     from ortools.sat.python import cp_model
     import time as _t
     reg=list(cen.regionais)[0]; anos=cen.anos
@@ -519,7 +529,9 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
     _TETO=float(max_time_s)*1.35
     _t0=_t.time()
 
-    def _sv(segundos, com_gap=True):
+    _gap_ret=gap_relativo if gap_retorno is None else gap_retorno
+
+    def _sv(segundos, com_gap=True, gap=None):
         """Solver de uma fase. Fabrica UNICA: um criterio novo repetido em cinco lugares e
         um criterio que alguem esquece no sexto.
 
@@ -529,10 +541,11 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
         deixa uma obrigatoria de fora COMO SE ela nao coubesse. O mesmo vale para `Mstar`.
         Essas duas fases provam em ~1s mesmo com 67 cidades, entao a folga nao compraria
         tempo nenhum; so compraria risco."""
+        g=gap_relativo if gap is None else gap
         s=cp_model.CpSolver()
         s.parameters.max_time_in_seconds=max(5.0,float(segundos))
         s.parameters.num_search_workers=int(workers)
-        if com_gap and gap_relativo and gap_relativo>0: s.parameters.relative_gap_limit=float(gap_relativo)
+        if com_gap and g and g>0: s.parameters.relative_gap_limit=float(g)
         return s
 
     def _fase0_obrig():
@@ -599,7 +612,9 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
                 RV,RC=_termos(y3,3)
                 if RV:
                     md3.Maximize(cp_model.LinearExpr.WeightedSum(RV,RC))
-                    s3=_sv(_TETO-(_t.time()-_t0))            # o que sobrou do teto, nao mais um
+                    # `_gap_ret`, e nao `gap_relativo`: aqui a folga e de RETORNO, e o que
+                    # ela compra e TEMPO. Afrouxa-la nao mexe em `C*`, ja travado acima.
+                    s3=_sv(_TETO-(_t.time()-_t0),gap=_gap_ret)   # o que sobrou do teto
                     st3=s3.Solve(md3)
                     if st3 in (cp_model.OPTIMAL,cp_model.FEASIBLE):
                         if verbose: print(f"  [info] desempate por retorno: cobertura travada em {Cstar}")
