@@ -531,6 +531,19 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
 
     _gap_ret=gap_relativo if gap_retorno is None else gap_retorno
 
+    def _sem_solucao(st):
+        """O solver terminou SEM incumbente?
+
+        `INFEASIBLE` era o unico status barrado, e nao e o unico que nao produz
+        solucao: `UNKNOWN` e `MODEL_INVALID` tambem chegam sem nada. Com eles,
+        `ObjectiveValue()` devolve lixo e `_extrai` monta `sel_final` PARCIAL —
+        uma cidade sem coluna selecionada. O reparo do teto anual, mais abaixo,
+        percorre TODAS as cidades indexando `sel[g]`, e a primeira ausente estoura
+        com `KeyError: '<nome da cidade>'`. Foi exatamente o sintoma observado em
+        producao, e o nome da cidade era so a ordem de iteracao.
+        """
+        return st not in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
     def _sv(segundos, com_gap=True, gap=None):
         """Solver de uma fase. Fabrica UNICA: um criterio novo repetido em cinco lugares e
         um criterio que alguem esquece no sexto.
@@ -563,12 +576,14 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
             if _modo=="ligacao":
                 md,y=_base(); _obrig_floor(md,y,O0); OV,OC=_termos(y,5); md.Maximize(cp_model.LinearExpr.WeightedSum(OV,OC))
                 sv=_sv(max_time_s)
-                st=sv.Solve(md); return _extrai(sv,y),st,"-",5,O0
+                st=sv.Solve(md)
+                if _sem_solucao(st): return None,st,"-",5,O0
+                return _extrai(sv,y),st,"-",5,O0
             md1,y1=_base(); _obrig_floor(md1,y1,O0); MV,MC=_termos(y1,4)
             md1.Minimize(cp_model.LinearExpr.WeightedSum(MV,MC) if MV else 0)
             s1=_sv(max_time_s*0.4,com_gap=False)   # prioridade ABSOLUTA: sem folga
             st1=s1.Solve(md1)
-            if st1==cp_model.INFEASIBLE: return None,st1,None,None,O0
+            if _sem_solucao(st1): return None,st1,None,None,O0
             Mstar=int(round(s1.ObjectiveValue())) if MV else 0
             md2,y2=_base(); _obrig_floor(md2,y2,O0); MV2,MC2=_termos(y2,4)
             if MV2: md2.Add(cp_model.LinearExpr.WeightedSum(MV2,MC2) <= Mstar)
@@ -576,7 +591,7 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
             OV,OC=_termos(y2,_idx2); md2.Maximize(cp_model.LinearExpr.WeightedSum(OV,OC))
             sv=_sv(max_time_s*0.6)
             st=sv.Solve(md2)
-            if st==cp_model.INFEASIBLE: return None,st,Mstar,_idx2,O0
+            if _sem_solucao(st): return None,st,Mstar,_idx2,O0
             plano2=_extrai(sv,y2)                            # o plano da fase 2, se a 3 falhar
 
             # ---------------- FASE 3: DESEMPATE POR RETORNO ----------------
@@ -614,7 +629,14 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
                     md3.Maximize(cp_model.LinearExpr.WeightedSum(RV,RC))
                     # `_gap_ret`, e nao `gap_relativo`: aqui a folga e de RETORNO, e o que
                     # ela compra e TEMPO. Afrouxa-la nao mexe em `C*`, ja travado acima.
-                    s3=_sv(_TETO-(_t.time()-_t0),gap=_gap_ret)   # o que sobrou do teto
+                    #
+                    # SE NAO SOBROU TEMPO, a fase nao roda. `_sv` tem piso de 5s, entao
+                    # pedir "o que sobrou" quando nao sobrou nada ainda custaria 5s e
+                    # furaria o teto que este calculo existe para respeitar. Pular e
+                    # seguro: `plano2` ja e um plano completo.
+                    _resta=_TETO-(_t.time()-_t0)
+                    if _resta<5.0: return plano2,st,Mstar,_idx2,O0
+                    s3=_sv(_resta,gap=_gap_ret)
                     st3=s3.Solve(md3)
                     if st3 in (cp_model.OPTIMAL,cp_model.FEASIBLE):
                         if verbose: print(f"  [info] desempate por retorno: cobertura travada em {Cstar}")
@@ -629,7 +651,7 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
         md,y=_base(); _obrig_floor(md,y,O0); OV,OC=_termos(y,0); md.Maximize(cp_model.LinearExpr.WeightedSum(OV,OC))
         sv=_sv(max_time_s)
         st=sv.Solve(md)
-        if st==cp_model.INFEASIBLE: return None,st,None,0,O0
+        if _sem_solucao(st): return None,st,None,0,O0
         return _extrai(sv,y),st,None,0,O0
 
     plano,st,Mstar,idx2,O0=_run()

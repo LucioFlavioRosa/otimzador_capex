@@ -14,7 +14,7 @@ planos so distingue dois cenarios se a diferenca superar a dispersao.
 O QUE OS TESTES GARANTEM, e nesta ordem de importancia:
   1. a fase 3 nao pode PIORAR o que as fases anteriores conquistaram;
   2. ela tem de melhorar (ou empatar) o retorno;
-  3. `gap_relativo` chega a TODAS as fases e o default nao muda nada.
+  3. cada folga chega a SUA fase — e nao as de prioridade absoluta.
 """
 import pytest
 
@@ -235,13 +235,21 @@ def test_os_dois_gaps_sao_independentes():
     """
     CP = solver_or_skip()
     vistos = _espiar(CP, _cenario(), gap_relativo=0.005, gap_retorno=0.05)
-    fases = [g for t, g in vistos if t != pytest.approx(float(TEMPO_COLUNAS))]
+    fases = [(t, g) for t, g in vistos if t != pytest.approx(float(TEMPO_COLUNAS))]
 
-    assert 0.005 in [pytest.approx(g) for g in fases], (
-        f"nenhuma fase recebeu o gap de COBERTURA: {fases}"
+    # POR FASE, e nao "aparece em alguma": presenca dos dois valores nao detectaria
+    # os dois TROCADOS, que e justamente a regressao que importa aqui — cobertura
+    # com 5% de folga muda o plano publicado.
+    cobertura = [g for t, g in fases if t == pytest.approx(TEMPO_FASES * 0.6)]
+    retorno = [g for t, g in fases if t not in
+               (pytest.approx(TEMPO_FASES * 0.35), pytest.approx(TEMPO_FASES * 0.4),
+                pytest.approx(TEMPO_FASES * 0.6))]
+
+    assert cobertura == [pytest.approx(0.005)], (
+        f"a fase de COBERTURA recebeu {cobertura}, esperava so o gap de cobertura"
     )
-    assert 0.05 in [pytest.approx(g) for g in fases], (
-        f"a fase de RETORNO nao recebeu o gap dela: {fases}"
+    assert retorno and all(g == pytest.approx(0.05) for g in retorno), (
+        f"a fase de RETORNO recebeu {retorno}, esperava o gap de retorno"
     )
 
 
@@ -257,3 +265,70 @@ def test_gap_retorno_ausente_herda_o_da_cobertura():
     assert all(g == pytest.approx(0.02) for g in comgap), (
         f"sem `gap_retorno`, todas as fases com folga usam o mesmo valor: {comgap}"
     )
+
+
+@pytest.mark.solver
+def test_status_e_o_PIOR_das_duas_fases():
+    """Otimo so quando as DUAS provaram. Era um dos defeitos apontados na revisao.
+
+    A fase 3 prova otimalidade do RETORNO dado `C*`; quem determinou `C*` foi a
+    fase 2. Devolver OPTIMAL porque a fase 3 provou, com a fase 2 tendo parado por
+    tempo ou por folga, e dizer "otimo" sobre uma cobertura que ninguem provou — e
+    esse texto vai para a tela e para `otim_meta`.
+    """
+    from ortools.sat.python import cp_model
+
+    CP = solver_or_skip()
+    original = cp_model.CpSolver.Solve
+    chamadas = {"n": 0}
+
+    def fase2_para_por_tempo(self, model, *a, **k):
+        """A fase de cobertura devolve FEASIBLE; as outras seguem normais."""
+        st = original(self, model, *a, **k)
+        chamadas["n"] += 1
+        if self.parameters.relative_gap_limit == pytest.approx(0.005) and st == cp_model.OPTIMAL:
+            return cp_model.FEASIBLE
+        return st
+
+    cp_model.CpSolver.Solve = fase2_para_por_tempo
+    try:
+        res = silent(CP.resolver_por_sistema, _cenario(), max_time_s=TEMPO_FASES,
+                     workers=4, col_time_s=TEMPO_COLUNAS, gap_relativo=0.005,
+                     gap_retorno=0.05)
+    finally:
+        cp_model.CpSolver.Solve = original
+
+    assert "OTIMO" not in str(res.get("milp_status", "")), (
+        f"a fase 2 parou sem provar, e o status diz otimo: {res.get('milp_status')}"
+    )
+
+
+@pytest.mark.solver
+def test_fase_sem_solucao_nao_vira_plano_pela_metade():
+    """`UNKNOWN` sem incumbente nao pode virar selecao PARCIAL.
+
+    Era `INFEASIBLE` o unico status barrado, e nao e o unico sem solucao. Com
+    `UNKNOWN`, `_extrai` montava `sel_final` faltando cidades, e o reparo do teto
+    anual — que percorre TODAS elas indexando `sel[g]` — estourava com
+    `KeyError: '<cidade>'`. Foi o sintoma visto em producao, e o nome da cidade era
+    so a ordem de iteracao.
+
+    Agora a rodada devolve um plano vazio e segue, em vez de quebrar.
+    """
+    from ortools.sat.python import cp_model
+
+    CP = solver_or_skip()
+    original = cp_model.CpSolver.Solve
+
+    def sempre_desconhecido(self, model, *a, **k):
+        original(self, model, *a, **k)
+        return cp_model.UNKNOWN
+
+    cp_model.CpSolver.Solve = sempre_desconhecido
+    try:
+        res = silent(CP.resolver_por_sistema, _cenario(), max_time_s=TEMPO_FASES,
+                     workers=4, col_time_s=TEMPO_COLUNAS)
+    finally:
+        cp_model.CpSolver.Solve = original
+
+    assert res is not None and "vpl" in res
