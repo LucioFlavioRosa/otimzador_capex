@@ -421,12 +421,20 @@ def _desconsidera_obrig_fora_janela(cen, verbose=True):
               f"{fora[:8]}"+(" ..." if len(fora)>8 else ""))
     return fora
 
-def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s=5, col_grid=12):
+def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s=5, col_grid=12,
+                         gap_relativo=0.0):
     """Decomposicao por CIDADE.
     FASE 0 (prioridade ABSOLUTA): construir o MAXIMO de obras OBRIGATORIAS que couber no teto
     anual, ANTES de qualquer obra opcional. Esse piso e travado nas fases seguintes.
-    Depois: foco>=0.95 -> LEXICOGRAFICO (metas 1o; 2a prioridade = cobertura/VPL); foco<0.95 -> ponderado.
-    Se alguma obrigatoria nao couber no orcamento, avisa exatamente quais (sem estourar o teto)."""
+    Depois: foco>=0.95 -> LEXICOGRAFICO (metas 1o; cobertura 2o; RETORNO como desempate);
+    foco<0.95 -> ponderado.
+    Se alguma obrigatoria nao couber no orcamento, avisa exatamente quais (sem estourar o teto).
+
+    gap_relativo: para a busca quando a solucao esta comprovadamente a menos de `gap_relativo`
+    do otimo (0.02 = 2%). 0.0 (default) mantem o comportamento historico: so para por prova
+    exata ou por relogio. Sem ele uma fase pode gastar o teto inteiro PROVANDO um plano que ja
+    tinha achado — medido numa unidade de 67 cidades: 339s de 720s, com o resultado final a
+    0,006% do limite superior provado."""
     from ortools.sat.python import cp_model
     import time as _t
     reg=list(cen.regionais)[0]; anos=cen.anos
@@ -505,12 +513,22 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
 
     _foco=getattr(cen,"foco_cobertura",None); _modo=str(getattr(cen,"penalidade_cobertura","meta+cobertura")).lower()
 
+    def _sv(fracao):
+        """Solver de uma fase. Fabrica UNICA para o `gap_relativo` valer em todas elas — antes
+        cada fase montava o seu, e um criterio novo teria de ser repetido em cinco lugares,
+        que e como se esquece um."""
+        s=cp_model.CpSolver()
+        s.parameters.max_time_in_seconds=max(5.0,float(max_time_s)*float(fracao))
+        s.parameters.num_search_workers=int(workers)
+        if gap_relativo and gap_relativo>0: s.parameters.relative_gap_limit=float(gap_relativo)
+        return s
+
     def _fase0_obrig():
         """FASE 0: maximiza o nº de obras OBRIGATORIAS construidas respeitando o teto anual."""
         md,y=_base(); V,C=_obrig_terms(y)
         if not V: return 0
         md.Maximize(cp_model.LinearExpr.WeightedSum(V,C))
-        sv=cp_model.CpSolver(); sv.parameters.max_time_in_seconds=max(5.0,float(max_time_s)*0.35); sv.parameters.num_search_workers=int(workers)
+        sv=_sv(0.35)
         st=sv.Solve(md)
         return int(round(sv.ObjectiveValue())) if st in (cp_model.OPTIMAL,cp_model.FEASIBLE) else 0
 
@@ -519,11 +537,11 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
         if _foco is not None and _foco>=0.95:               # lexicografico
             if _modo=="ligacao":
                 md,y=_base(); _obrig_floor(md,y,O0); OV,OC=_termos(y,5); md.Maximize(cp_model.LinearExpr.WeightedSum(OV,OC))
-                sv=cp_model.CpSolver(); sv.parameters.max_time_in_seconds=float(max_time_s); sv.parameters.num_search_workers=int(workers)
+                sv=_sv(1.0)
                 st=sv.Solve(md); return _extrai(sv,y),st,"-",5,O0
             md1,y1=_base(); _obrig_floor(md1,y1,O0); MV,MC=_termos(y1,4)
             md1.Minimize(cp_model.LinearExpr.WeightedSum(MV,MC) if MV else 0)
-            s1=cp_model.CpSolver(); s1.parameters.max_time_in_seconds=max(5.0,float(max_time_s)*0.4); s1.parameters.num_search_workers=int(workers)
+            s1=_sv(0.4)
             st1=s1.Solve(md1)
             if st1==cp_model.INFEASIBLE: return None,st1,None,None,O0
             Mstar=int(round(s1.ObjectiveValue())) if MV else 0
@@ -531,13 +549,48 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
             if MV2: md2.Add(cp_model.LinearExpr.WeightedSum(MV2,MC2) <= Mstar)
             _idx2=3 if _modo=="meta" else 5
             OV,OC=_termos(y2,_idx2); md2.Maximize(cp_model.LinearExpr.WeightedSum(OV,OC))
-            sv=cp_model.CpSolver(); sv.parameters.max_time_in_seconds=max(5.0,float(max_time_s)*0.6); sv.parameters.num_search_workers=int(workers)
+            sv=_sv(0.6)
             st=sv.Solve(md2)
             if st==cp_model.INFEASIBLE: return None,st,Mstar,_idx2,O0
-            return _extrai(sv,y2),st,Mstar,_idx2,O0
+            plano2=_extrai(sv,y2)                            # o plano da fase 2, se a 3 falhar
+
+            # ---------------- FASE 3: DESEMPATE POR RETORNO ----------------
+            # Sem ela o VPL e SORTEIO. A fase 2 maximiza cobertura; ao chegar em C* devolve o
+            # primeiro plano que o atinge, e entre um que rende 154 Mi e outro que rende 118 Mi
+            # com a MESMA cobertura o solver nao tem preferencia. Qual dos dois sai depende da
+            # ordem de busca e do timing das threads do portfolio paralelo.
+            #
+            # Medido na uA3 (67 cidades, 120 Mi/ano): duas execucoes com parametros IDENTICOS
+            # devolveram VPL de 154,89 Mi e 150,27 Mi. Isso nao e vies — vies preservaria a
+            # ordem entre cenarios. E DISPERSAO, que embaralha. Para quem usa o otimizador para
+            # COMPARAR planos, e o defeito que importa: dois cenarios so sao distinguiveis se a
+            # diferenca entre eles superar a dispersao.
+            #
+            # SEMPRE VIAVEL: o plano da fase 2 satisfaz `>= Cstar`. O teste de status existe
+            # para o caso de ela nao terminar a tempo — devolve o plano da fase 2, nunca pior
+            # que o comportamento anterior.
+            #
+            # SO quando a fase 2 otimizou COBERTURA (idx 5). No modo "meta" ela ja maximiza o
+            # proprio VPL (idx 3), e desempatar VPL por VPL seria gastar tempo para nada.
+            if _idx2==5:
+                Cstar=int(round(sv.ObjectiveValue()))
+                md3,y3=_base(); _obrig_floor(md3,y3,O0)
+                MV3,MC3=_termos(y3,4)
+                if MV3: md3.Add(cp_model.LinearExpr.WeightedSum(MV3,MC3) <= Mstar)
+                CV,CC=_termos(y3,5)
+                if CV: md3.Add(cp_model.LinearExpr.WeightedSum(CV,CC) >= Cstar)
+                RV,RC=_termos(y3,0)                          # idx 0 = VPL de objetivo
+                if RV:
+                    md3.Maximize(cp_model.LinearExpr.WeightedSum(RV,RC))
+                    s3=_sv(0.6)
+                    st3=s3.Solve(md3)
+                    if st3 in (cp_model.OPTIMAL,cp_model.FEASIBLE):
+                        if verbose: print(f"  [info] desempate por retorno: cobertura travada em {Cstar}")
+                        return _extrai(s3,y3),st3,Mstar,_idx2,O0
+            return plano2,st,Mstar,_idx2,O0
         # ponderado
         md,y=_base(); _obrig_floor(md,y,O0); OV,OC=_termos(y,0); md.Maximize(cp_model.LinearExpr.WeightedSum(OV,OC))
-        sv=cp_model.CpSolver(); sv.parameters.max_time_in_seconds=float(max_time_s); sv.parameters.num_search_workers=int(workers)
+        sv=_sv(1.0)
         st=sv.Solve(md)
         if st==cp_model.INFEASIBLE: return None,st,None,0,O0
         return _extrai(sv,y),st,None,0,O0
