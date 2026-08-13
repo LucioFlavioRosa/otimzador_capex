@@ -332,3 +332,67 @@ def test_fase_sem_solucao_nao_vira_plano_pela_metade():
         cp_model.CpSolver.Solve = original
 
     assert res is not None and "vpl" in res
+
+
+def test_a_fase_3_maximiza_VPL_PURO_e_nao_o_objetivo_penalizado():
+    """Trava o defeito mais grave da primeira versao: o indice errado.
+
+    A fase 3 maximizava `_termos(y3,0)` — `vpl_obj`, nao `vpl`. E
+    `vpl_obj = vpl - peso_cobertura * penalidade`, com o motor fazendo
+    `peso_cobertura = capex_total * 10` quando `foco_cobertura=1.0`. O objetivo
+    ficava dominado pela penalidade, e a "fase de desempate por retorno"
+    re-otimizava COBERTURA sob outro nome — com a cobertura ja travada pela
+    restricao acima dela.
+
+    ESTE TESTE E DE CODIGO-FONTE, e isso e deliberado. Um teste de comportamento
+    nao discrimina os dois indices de forma confiavel: quando o plano cumpre todas
+    as metas a penalidade e ZERO, e ai `vpl_obj == vpl` — os dois indices produzem
+    exatamente o mesmo objetivo, e nenhuma assercao sobre o resultado consegue
+    separa-los. Depender do cenario pequeno expor a diferenca foi apontado como
+    fragilidade na revisao, com razao.
+
+    Entao o que se trava aqui e a ESCOLHA, no lugar onde ela e feita. E frageis a
+    refatoracao — se a linha mudar de forma, o teste cai e alguem tem de olhar. Num
+    defeito que inverteu o proposito da fase inteira, esse custo vale.
+    """
+    import re
+    from pathlib import Path
+
+    fonte = (Path(__file__).resolve().parents[1]
+             / "otimizador" / "dominio" / "otimizador_capex_cpsat63.py").read_text(encoding="utf-8")
+    objetivo = re.search(r"RV,RC=_termos\(y3,(\d+)\)", fonte)
+
+    assert objetivo, "nao achei o objetivo da fase 3 — a fase saiu ou mudou de forma"
+    assert objetivo.group(1) == "3", (
+        f"a fase 3 esta maximizando o indice {objetivo.group(1)}. O 3 e o VPL puro; "
+        f"o 0 e `vpl_obj`, que carrega a penalidade de cobertura e faz a fase "
+        f"re-otimizar cobertura em vez de retorno"
+    )
+
+
+@pytest.mark.solver
+def test_sem_tempo_restante_a_fase_3_NAO_roda():
+    """O teto so e rigido se a fase 3 souber desistir.
+
+    `_sv` tem piso de 5s. Pedir "o que sobrou do teto" quando nao sobrou nada ainda
+    custaria 5s e furaria o teto que o calculo existe para respeitar. Com
+    `max_time_s` minusculo, o piso faz as fases anteriores estourarem o teto
+    sozinhas — e a fase 3 tem de ser pulada, nao encurtada.
+
+    Pular e seguro: o plano da fase 2 ja e completo.
+    """
+    import contextlib
+    import io
+
+    CP = solver_or_skip()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        res = CP.resolver_por_sistema(_cenario(), max_time_s=1, workers=4,
+                                      col_time_s=TEMPO_COLUNAS, verbose=True,
+                                      gap_relativo=0.005, gap_retorno=0.05)
+
+    # `max_time_s=1` -> teto de 1,35s, e so o piso das fases anteriores ja o consome.
+    assert "desempate por retorno" not in buf.getvalue(), (
+        "a fase 3 rodou sem tempo no teto — ela deveria ter sido pulada"
+    )
+    assert res is not None and "vpl" in res, "pular a fase 3 nao pode perder o plano"
