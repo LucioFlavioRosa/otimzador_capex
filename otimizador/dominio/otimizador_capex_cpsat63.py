@@ -529,6 +529,26 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
     _TETO=float(max_time_s)*1.35
     _t0=_t.time()
 
+    #: A fase 3 foi PULADA POR FALTA DE TEMPO? Dict porque o `_run()` aninhado
+    #: escreve nele sem precisar de `nonlocal`.
+    #:
+    #: Existe porque essa desistencia era SILENCIOSA, e o silencio inverte a
+    #: leitura do resultado. Medido na uA3 (67 cidades, 8.079 obras, mesmos
+    #: parametros, so o teto mudando):
+    #:
+    #:     max_time_s=500   -> fase 3 pulada -> status OTIMO  -> VPL 141,7 Mi
+    #:     max_time_s=1000  -> fase 3 rodou  -> status VIAVEL -> VPL 170,4 Mi
+    #:
+    #: O status vem da ULTIMA fase que rodou. Sem a fase 3, ele e o da fase 2 —
+    #: que provou o proprio otimo e diz OTIMO. Entao a rodada PIOR exibe o rotulo
+    #: MELHOR, e quem comparasse duas rodadas pelo status escolheria a errada. O
+    #: plano nao denuncia: as duas tem a mesma cobertura (47,76% x 47,84%) e o
+    #: mesmo CAPEX (+0,1%); o que muda e so o VPL, em 20%.
+    #:
+    #: Nao e o mesmo que a fase 3 NAO SE APLICAR (modo meta, ou sem termo de
+    #: retorno): la ela nao tinha o que fazer, e a ausencia nao esconde nada.
+    _fase3={"pulada_por_tempo":False}
+
     _gap_ret=gap_relativo if gap_retorno is None else gap_retorno
 
     def _sem_solucao(st):
@@ -635,7 +655,15 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
                     # furaria o teto que este calculo existe para respeitar. Pular e
                     # seguro: `plano2` ja e um plano completo.
                     _resta=_TETO-(_t.time()-_t0)
-                    if _resta<5.0: return plano2,st,Mstar,_idx2,O0
+                    if _resta<5.0:
+                        # PULAR E SEGURO, MAS NAO E NEUTRO: o plano da fase 2 esta
+                        # completo, e ainda assim rende menos — foi a fase 3 que
+                        # deixou de escolher, entre planos de mesma cobertura, o de
+                        # maior retorno. Marcar e avisar, porque o status sozinho
+                        # diria o contrario (ver `_fase3`).
+                        _fase3["pulada_por_tempo"]=True
+                        if verbose: print(f"  [aviso] fase de desempate PULADA: sobraram {max(0.0,_resta):.1f}s do teto de {_TETO:.0f}s (minimo 5s). O VPL e o da fase de cobertura, que nao escolhe entre planos de mesma cobertura — aumente MAX_TIME_S para que ela rode.")
+                        return plano2,st,Mstar,_idx2,O0
                     s3=_sv(_resta,gap=_gap_ret)
                     st3=s3.Solve(md3)
                     if st3 in (cp_model.OPTIMAL,cp_model.FEASIBLE):
@@ -726,11 +754,16 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
                                 "estao na mesma versao e se a celula de carga nao foi reexecutada depois do solve.")
     _p2="cobertura" if idx2==5 else ("VPL" if idx2==3 else "-")
     _ob_tag=f" | obrig {len(ob)-len(nao)}/{len(ob)}"
+    # SUFIXO, e nunca prefixo: quem le este campo o le por prefixo — `qualidade.py`
+    # faz `st.startswith(("OTIMO","VIAVEL",...))` no portao, e o backend deriva o
+    # vocabulario da tela do mesmo jeito. Mudar o comeco reprovaria toda rodada.
+    # O aviso viaja no fim, onde e lido por humano e ignorado por parser.
+    _ret_tag=" | SEM desempate por retorno (tempo esgotado): VPL nao otimizado" if _fase3["pulada_por_tempo"] else ""
     if _foco is not None and _foco>=0.95:
-        res["milp_status"]=("OTIMO" if st==cp_model.OPTIMAL else "VIAVEL(limite de tempo)")+_ob_tag+(f" | lexicografico: min metas_nao={Mstar}, 2a prior={_p2}" if _modo!="ligacao" else " | so cobertura")
+        res["milp_status"]=("OTIMO" if st==cp_model.OPTIMAL else "VIAVEL(limite de tempo)")+_ob_tag+(f" | lexicografico: min metas_nao={Mstar}, 2a prior={_p2}" if _modo!="ligacao" else " | so cobertura")+_ret_tag
         res["vpl_obj"]=res["vpl"]; res["milp_bound"]=res["vpl"] if st==cp_model.OPTIMAL else res.get("milp_bound",res["vpl"])
         res["milp_solver"]="CP-SAT lexicografico por cidade (obrigatorias primeiro)"
     else:
-        res["milp_status"]=("OTIMO" if st==cp_model.OPTIMAL else "VIAVEL(limite de tempo)")+_ob_tag
+        res["milp_status"]=("OTIMO" if st==cp_model.OPTIMAL else "VIAVEL(limite de tempo)")+_ob_tag+_ret_tag
         res["milp_bound"]=res.get("milp_bound",res["vpl"]); res["milp_solver"]="CP-SAT (ponderado por cidade, obrigatorias primeiro)"
     return res

@@ -28,13 +28,14 @@ Se você não vai rodar o pipeline, o mínimo para a suíte é:
 
 ```
 $ python -m pytest tests/
-107 collected
-94 passed, 13 skipped in 2.9s
+120 collected
+107 passed, 13 skipped in 3.4s
 ```
 
 | Arquivo | Testes |
 |---|---|
 | `test_nucleo.py` | 9 |
+| `test_desempate_por_retorno.py` | 13 |
 | `test_cts.py` | 9 |
 | `test_classe.py` | 7 |
 | `test_derivadas.py` | 2 |
@@ -53,9 +54,9 @@ $ python -m pytest tests/
 
 | Ambiente | Resultado | Quem pula a mais |
 |---|---|---|
-| completo | **94 passed, 13 skipped** | — |
-| sem `ortools` | 83 passed, **24 skipped** | 5 marcados `solver` + 7 de `rodar()`, que usa o CP-SAT — e o skip da suíte legada vira skip de solver, então sobem 11 e não 12 |
-| sem `matplotlib` | 84 passed, **23 skipped** | 10 de `test_producao.py` — a materialização importa o `dashboard` |
+| completo | **107 passed, 13 skipped** | — |
+| sem `ortools` | 84 passed, **36 skipped** | +23: os 13 de `test_desempate_por_retorno.py` menos 1 que não pede solver, 7 de `test_producao.py` (`rodar()` usa o CP-SAT), 2 de `test_regressao_golden.py` e 2 de `test_nucleo.py` |
+| sem `matplotlib` | 97 passed, **23 skipped** | +10, todos de `test_producao.py` — a materialização importa o `dashboard` |
 
 **Nenhum skip é aceitável em vermelho:** se um teste *falhar* em vez de pular, é bug.
 
@@ -158,7 +159,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - run: pip install -r requirements-prod.txt
-      - run: pytest -q tests/          # 80 passed, 13 skipped
+      - run: pytest -q tests/          # 107 passed, 13 skipped
 
   com-postgres:
     runs-on: ubuntu-latest
