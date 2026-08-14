@@ -34,6 +34,14 @@
 --
 -- Rode uma vez. É idempotente: `IF NOT EXISTS` nas adições, `IF EXISTS` nas remoções, e o
 -- UPDATE só toca linha cuja coluna nova ainda está nula.
+--
+-- NULO NAO VIRA ZERO. `GREATEST` do Postgres IGNORA nulos — `GREATEST(0, NULL)` devolve
+-- `0`, e nao `NULL`. Sem o `CASE` abaixo, uma sub-bacia com `universo_ligacoes` nulo
+-- (desconhecido) receberia residencial `0` (nao tem universo), e o motor usaria esse
+-- zero como denominador da meta, porque a coluna deixaria de ser nula. Base que ja
+-- rodou a versao anterior desta migracao deve conferir:
+--   SELECT count(*) FROM input.subbacia_operacional
+--    WHERE universo_ligacoes IS NULL AND universo_ligacoes_residencial = 0;
 
 BEGIN;
 
@@ -45,20 +53,22 @@ ALTER TABLE input.subbacia_operacional
   ADD COLUMN IF NOT EXISTS economias_atuais_residencial    integer;
 
 UPDATE input.subbacia_operacional SET
-  universo_ligacoes_residencial = GREATEST(0, universo_ligacoes - COALESCE(universo_ligacoes_industrial, 0)),
-  ligacoes_atuais_residencial   = GREATEST(0, ligacoes_atuais   - COALESCE(ligacoes_atuais_industrial, 0)),
+  universo_ligacoes_residencial = CASE WHEN universo_ligacoes IS NULL THEN NULL
+    ELSE GREATEST(0, universo_ligacoes - COALESCE(universo_ligacoes_industrial, 0)) END,
+  ligacoes_atuais_residencial   = CASE WHEN ligacoes_atuais IS NULL THEN NULL
+    ELSE GREATEST(0, ligacoes_atuais - COALESCE(ligacoes_atuais_industrial, 0)) END,
   -- Economias residenciais pela densidade da própria sub-bacia (economias por ligação).
   -- Sem universo de ligações não há densidade: fica nulo, e a engine cai para o total
   -- nessa sub-bacia, avisando.
   universo_economias_residencial = CASE WHEN COALESCE(universo_ligacoes, 0) > 0
     THEN ROUND(universo_economias::numeric
                * GREATEST(0, universo_ligacoes - COALESCE(universo_ligacoes_industrial, 0))::numeric
-               / universo_ligacoes::numeric)
+               / universo_ligacoes::numeric)   -- aqui o CASE ja garante universo NAO nulo
     END,
   economias_atuais_residencial = CASE WHEN COALESCE(ligacoes_atuais, 0) > 0
     THEN ROUND(economias_atuais::numeric
                * GREATEST(0, ligacoes_atuais - COALESCE(ligacoes_atuais_industrial, 0))::numeric
-               / ligacoes_atuais::numeric)
+               / ligacoes_atuais::numeric)     -- idem
     END
 WHERE universo_ligacoes_residencial IS NULL;
 
@@ -79,17 +89,19 @@ ALTER TABLE input.cts_operacional
   ADD COLUMN IF NOT EXISTS economias_atuais_residencial    integer;
 
 UPDATE input.cts_operacional SET
-  universo_ligacoes_residencial = GREATEST(0, universo_ligacoes - COALESCE(universo_ligacoes_industrial, 0)),
-  ligacoes_atuais_residencial   = GREATEST(0, ligacoes_atuais   - COALESCE(ligacoes_atuais_industrial, 0)),
+  universo_ligacoes_residencial = CASE WHEN universo_ligacoes IS NULL THEN NULL
+    ELSE GREATEST(0, universo_ligacoes - COALESCE(universo_ligacoes_industrial, 0)) END,
+  ligacoes_atuais_residencial   = CASE WHEN ligacoes_atuais IS NULL THEN NULL
+    ELSE GREATEST(0, ligacoes_atuais - COALESCE(ligacoes_atuais_industrial, 0)) END,
   universo_economias_residencial = CASE WHEN COALESCE(universo_ligacoes, 0) > 0
     THEN ROUND(universo_economias::numeric
                * GREATEST(0, universo_ligacoes - COALESCE(universo_ligacoes_industrial, 0))::numeric
-               / universo_ligacoes::numeric)
+               / universo_ligacoes::numeric)   -- aqui o CASE ja garante universo NAO nulo
     END,
   economias_atuais_residencial = CASE WHEN COALESCE(ligacoes_atuais, 0) > 0
     THEN ROUND(economias_atuais::numeric
                * GREATEST(0, ligacoes_atuais - COALESCE(ligacoes_atuais_industrial, 0))::numeric
-               / ligacoes_atuais::numeric)
+               / ligacoes_atuais::numeric)     -- idem
     END
 WHERE universo_ligacoes_residencial IS NULL;
 

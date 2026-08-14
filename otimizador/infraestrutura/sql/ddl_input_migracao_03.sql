@@ -37,6 +37,11 @@
 -- Sub-bacia sem CTS pareada recebe a própria quantidade: sem coletor não há
 -- sobreposição, e `com_cts` é igual a `exclusiva`.
 --
+-- NULO NÃO VIRA ZERO. `COALESCE(s.universo_ligacoes, 0) + …` transformaria um universo
+-- DESCONHECIDO em "só o que vem da CTS", e o motor usaria esse número como denominador
+-- da meta — porque a coluna deixaria de ser nula. Nulo de um lado propaga nulo, e a
+-- sub-bacia cai no caminho que ALERTA em vez de calcular sobre dado que não existe.
+--
 -- Rode uma vez. É idempotente: `IF NOT EXISTS` nas adições e o UPDATE só toca linha
 -- cuja coluna nova ainda está nula.
 
@@ -53,18 +58,22 @@ ALTER TABLE input.subbacia_operacional
   ADD COLUMN IF NOT EXISTS economias_atuais_residencial_com_cts    integer;
 
 UPDATE input.subbacia_operacional s SET
-  universo_ligacoes_com_cts  = COALESCE(s.universo_ligacoes, 0)  + COALESCE(k.universo_ligacoes, 0),
-  ligacoes_atuais_com_cts    = COALESCE(s.ligacoes_atuais, 0)    + COALESCE(k.ligacoes_atuais, 0),
-  universo_economias_com_cts = COALESCE(s.universo_economias, 0) + COALESCE(k.universo_economias, 0),
-  economias_atuais_com_cts   = COALESCE(s.economias_atuais, 0)   + COALESCE(k.economias_atuais, 0),
-  universo_ligacoes_residencial_com_cts  = COALESCE(s.universo_ligacoes_residencial, 0)
-                                         + COALESCE(k.universo_ligacoes_residencial, 0),
-  ligacoes_atuais_residencial_com_cts    = COALESCE(s.ligacoes_atuais_residencial, 0)
-                                         + COALESCE(k.ligacoes_atuais_residencial, 0),
-  universo_economias_residencial_com_cts = COALESCE(s.universo_economias_residencial, 0)
-                                         + COALESCE(k.universo_economias_residencial, 0),
-  economias_atuais_residencial_com_cts   = COALESCE(s.economias_atuais_residencial, 0)
-                                         + COALESCE(k.economias_atuais_residencial, 0)
+  universo_ligacoes_com_cts = CASE WHEN s.universo_ligacoes IS NULL THEN NULL
+    ELSE s.universo_ligacoes + COALESCE(k.universo_ligacoes, 0) END,
+  ligacoes_atuais_com_cts = CASE WHEN s.ligacoes_atuais IS NULL THEN NULL
+    ELSE s.ligacoes_atuais + COALESCE(k.ligacoes_atuais, 0) END,
+  universo_economias_com_cts = CASE WHEN s.universo_economias IS NULL THEN NULL
+    ELSE s.universo_economias + COALESCE(k.universo_economias, 0) END,
+  economias_atuais_com_cts = CASE WHEN s.economias_atuais IS NULL THEN NULL
+    ELSE s.economias_atuais + COALESCE(k.economias_atuais, 0) END,
+  universo_ligacoes_residencial_com_cts = CASE WHEN s.universo_ligacoes_residencial IS NULL THEN NULL
+    ELSE s.universo_ligacoes_residencial + COALESCE(k.universo_ligacoes_residencial, 0) END,
+  ligacoes_atuais_residencial_com_cts = CASE WHEN s.ligacoes_atuais_residencial IS NULL THEN NULL
+    ELSE s.ligacoes_atuais_residencial + COALESCE(k.ligacoes_atuais_residencial, 0) END,
+  universo_economias_residencial_com_cts = CASE WHEN s.universo_economias_residencial IS NULL THEN NULL
+    ELSE s.universo_economias_residencial + COALESCE(k.universo_economias_residencial, 0) END,
+  economias_atuais_residencial_com_cts = CASE WHEN s.economias_atuais_residencial IS NULL THEN NULL
+    ELSE s.economias_atuais_residencial + COALESCE(k.economias_atuais_residencial, 0) END
 FROM input.subbacia_cts p
 LEFT JOIN input.cts_operacional k ON k.cts = p.cts
 WHERE p.sub_bacia = s.sub_bacia

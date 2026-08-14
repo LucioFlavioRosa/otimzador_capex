@@ -1086,6 +1086,7 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     # O QUE ISSO CUSTA, DECLARADO: sem o coletor, a vazao que a sub-bacia manda para a ETE
     # e a que estiver na base dela. Se a base nao tiver sido atualizada para esse cenario,
     # a ETE e dimensionada sem o esgoto que vinha pelo coletor.
+    _absorvidas=[]; _sem_consolidado=[]        # so o modo desligado preenche
     if usar_cts:                                   # LIGADO: CTS entra como no proprio (dados operacionais)
         for _c,_row in _cts_op.items(): subop[_c]=_row
     else:                                          # DESLIGADO: a sub-bacia le as colunas consolidadas
@@ -1096,7 +1097,10 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         # Vazao, receita e populacao sao DADO da sub-bacia. Se desligar o coletor muda a
         # vazao dela, quem atualiza a base e quem cadastra; o motor nao arbitra o numero.
         # E a escolha nao mexe em receita.
-        _sem_consolidado=[]
+        # As duas listas sao do BANCO INTEIRO — `subop` so e filtrado pela unidade mais
+        # adiante. Elas viram aviso la embaixo, ja recortadas por `cen.nos`: dizer "337
+        # sub-bacias" numa unidade que tem 186 (ou nenhuma) e ruido que ensina a ignorar
+        # aviso. A linha `[info] CTS:` ao lado sempre fez esse recorte certo.
         for _sb,_c in _cts_dep.items():
             if _sb not in subop or _c not in _cts_op: continue
             _s=subop[_sb]
@@ -1110,14 +1114,6 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
             for _exc,_tot in _CTS_CONSOLIDADO:
                 if _s.get(_tot) not in (None,""): _s[_exc]=num(_s.get(_tot))
         _absorvidas=[_sb for _sb,_c in _cts_dep.items() if _sb in subop and _c in _cts_op]
-        if _absorvidas:
-            print(f"  [aviso] {len(_absorvidas)} sub-bacia(s) com CTS pareada: sem o coletor, VAZAO, "
-                  f"RECEITA e POPULACAO usadas sao as da BASE DA SUB-BACIA — a linha da CTS nao entra. "
-                  f"Se desligar o coletor muda a vazao, a base precisa refletir isso.")
-        if _sem_consolidado:
-            print(f"  [ALERTA] {len(_sem_consolidado)} sub-bacia(s) com CTS pareada mas SEM "
-                  f"`universo_ligacoes_com_cts`: a rodada sem coletor usou o universo EXCLUSIVO delas, "
-                  f"ou seja, ignorou a area sobreposta. Ex.: {_sem_consolidado[:3]}")
     # ---- UNIDADES ----------------------------------------------------------------
     # LIGACOES e ECONOMIAS vem SEMPRE da base comercial (Databricks) para toda sub-bacia.
     # POPULACAO e opcional e entra por input do usuario, quando precisa.
@@ -1573,4 +1569,16 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         # coluna consolidada. Log que descreve o codigo antigo e pior que log nenhum.
         print(f"  [info] CTS: {len(_cts_na_uni)} nesta unidade ({len(_cts_ids_all)} no banco) -> usar_cts={usar_cts} "
               f"({'entram como nos proprios' if usar_cts else 'a sub-bacia absorve a pareada (colunas *_com_cts)'})")
+    # RECORTADOS PELA UNIDADE. `cen.nos` e o mesmo filtro que a linha acima usa — sem ele
+    # o aviso falaria do banco inteiro, inclusive numa unidade sem CTS nenhuma.
+    _abs_uni=[_sb for _sb in _absorvidas if _sb in cen.nos]
+    _sem_uni=[_sb for _sb in _sem_consolidado if _sb in cen.nos]
+    if _abs_uni:
+        print(f"  [aviso] {len(_abs_uni)} sub-bacia(s) desta unidade com CTS pareada: sem o coletor, "
+              f"VAZAO, RECEITA e POPULACAO usadas sao as da BASE DA SUB-BACIA — a linha da CTS nao "
+              f"entra. Se desligar o coletor muda a vazao, a base precisa refletir isso.")
+    if _sem_uni:
+        print(f"  [ALERTA] {len(_sem_uni)} sub-bacia(s) desta unidade com CTS pareada mas SEM "
+              f"`universo_ligacoes_com_cts`: a rodada sem coletor usou o universo EXCLUSIVO delas, "
+              f"ou seja, ignorou a area sobreposta. Ex.: {_sem_uni[:3]}")
     return cen
