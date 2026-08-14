@@ -79,7 +79,7 @@ job_databricks.rodar(run_id, pg_url, service_bus)
 
 1. Grava o cadastro nas tabelas `input.*` (telas de cadastro).
 2. `INSERT` em `controle.run_request` com `run_id` + `params` (JSONB = os parâmetros da célula
-   PARAMETROS: `UNIDADE`, `ORCAMENTO`, `BASE_RECEITA`, `USAR_CTS`, `INCLUIR_INDUSTRIAL`, ...).
+   PARAMETROS: `UNIDADE`, `ORCAMENTO`, `BASE_RECEITA`, `USAR_CTS`, `COBERTURA_SO_RESIDENCIAL`, ...).
 
    Contrato do `params` (validado em `job_databricks._params_para_ler_banco`):
    - chaves aceitas = `MAPA_PARAMS` + `CHAVES_DO_JOB` (`USUARIO`, `MAX_TIME_S`, `WORKERS`);

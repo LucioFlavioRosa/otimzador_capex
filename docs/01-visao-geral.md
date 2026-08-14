@@ -201,11 +201,13 @@ individualmente, e a capacidade cresce com o fluxo. Muda a **cardinalidade do pr
 cobertura em `ligacoes`, `economias` **ou** `populacao`. Isso define a régua da meta e da
 faixa de paridade daquela cidade. **A receita continua sempre em ligações**, em qualquer régua.
 
-**Parcela industrial** — as colunas sem sufixo (`universo_ligacoes`, `receita_*`,
-`vazao_contribuicao`) são o **TOTAL** = residencial + industrial. As colunas `*_industrial`
-são a **parcela já contida nesse total**. Com `INCLUIR_INDUSTRIAL=True` usa-se o total como
-está; com `False`, residencial = total − industrial. **Nunca somar.** Erro clássico: dupla
-contagem. Está registrado como `COMMENT ON COLUMN` no DDL e tem 7 testes dedicados.
+**Parcela residencial** — as colunas sem sufixo (`universo_ligacoes`, `receita_*`,
+`vazao_contribuicao`) são o **TOTAL** = residencial + industrial. As colunas `*_residencial`
+são a **parcela já contida nesse total**. **Nunca somar** — erro clássico, dupla contagem.
+
+O recorte **acaba na cobertura**: `COBERTURA_SO_RESIDENCIAL=True` mede a meta nas colunas
+residenciais, e receita, VPL, vazão e CAPEX seguem no total. Registrado como
+`COMMENT ON COLUMN` no DDL, com testes dedicados em `tests/test_classe.py`.
 
 **Obra de terceiros** — CAPEX 0 com `tempo_execucao > 0`. A obra acontece e libera a cadeia,
 mas não consome orçamento da Aegea. `otim_obra.responsavel` distingue.
