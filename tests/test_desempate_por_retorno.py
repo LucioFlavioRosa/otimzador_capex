@@ -276,9 +276,12 @@ def test_status_e_o_PIOR_das_duas_fases():
     tempo ou por folga, e dizer "otimo" sobre uma cobertura que ninguem provou — e
     esse texto vai para a tela e para `otim_meta`.
     """
+    # `solver_or_skip()` ANTES do import: sem OR-Tools instalado, importar aqui
+    # levanta ImportError e o teste FALHA em vez de pular — e a suite declara que
+    # dependencia opcional ausente sobe o numero de skips e nunca vira vermelho.
+    CP = solver_or_skip()
     from ortools.sat.python import cp_model
 
-    CP = solver_or_skip()
     original = cp_model.CpSolver.Solve
     chamadas = {"n": 0}
 
@@ -315,9 +318,10 @@ def test_fase_sem_solucao_nao_vira_plano_pela_metade():
 
     Agora a rodada devolve um plano vazio e segue, em vez de quebrar.
     """
+    # Mesma ordem do teste acima, e pela mesma razao: skip antes do import.
+    CP = solver_or_skip()
     from ortools.sat.python import cp_model
 
-    CP = solver_or_skip()
     original = cp_model.CpSolver.Solve
 
     def sempre_desconhecido(self, model, *a, **k):
@@ -392,7 +396,29 @@ def test_sem_tempo_restante_a_fase_3_NAO_roda():
                                       gap_relativo=0.005, gap_retorno=0.05)
 
     # `max_time_s=1` -> teto de 1,35s, e so o piso das fases anteriores ja o consome.
-    assert "desempate por retorno" not in buf.getvalue(), (
+    #
+    # A checagem e pela linha `[info]`, que so e impressa quando a fase RESOLVE, e
+    # nao pelo substring "desempate por retorno" — o aviso de pulo tambem o contem,
+    # e a versao anterior deste teste passaria a reprovar a propria correcao.
+    saida = buf.getvalue()
+    assert "[info] desempate por retorno" not in saida, (
         "a fase 3 rodou sem tempo no teto — ela deveria ter sido pulada"
     )
     assert res is not None and "vpl" in res, "pular a fase 3 nao pode perder o plano"
+
+    # PULAR TEM DE SER AUDIVEL. Sem isto a desistencia era silenciosa, e o status —
+    # que vem da fase 2, provada — dizia OTIMO sobre um VPL que ninguem otimizou.
+    # Medido na uA3: o mesmo cenario com teto maior rendeu 20% mais VPL com o
+    # mesmo plano fisico, e nada no resultado denunciava a diferenca.
+    assert "[aviso] fase de desempate PULADA" in saida, (
+        "a fase 3 foi pulada sem avisar — foi assim que o silencio inverteu a "
+        "leitura de duas rodadas na uA3"
+    )
+    assert "SEM desempate por retorno" in res["milp_status"], (
+        f"o status precisa carregar o pulo, e nao so o log: {res['milp_status']}"
+    )
+    # E o PREFIXO segue intacto: `qualidade.py` e o backend leem este campo com
+    # `startswith`. Um aviso que virasse prefixo reprovaria toda rodada no portao.
+    assert res["milp_status"].startswith(("OTIMO", "VIAVEL", "SEM SOLUCAO")), (
+        f"o aviso tem de ser sufixo: {res['milp_status']}"
+    )

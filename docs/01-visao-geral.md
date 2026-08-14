@@ -46,7 +46,7 @@ Toda a leitura e escrita vive em **adaptadores** ao redor:
 
 Consequências práticas — é por isso que vale a pena manter:
 
-1. **A suíte de testes existe.** 94 dos 107 testes rodam sem banco, sem rede e sem credencial,
+1. **A suíte de testes existe.** 107 dos 120 testes rodam sem banco, sem rede e sem credencial,
    em ~2 s (os outros 13 pulam: 12 precisam de Postgres, 1 precisa da suíte legada). Se o
    motor tivesse SQL dentro, nada disso seria testável.
 2. **O caminho Excel continua funcionando.** `ler_banco(<arquivo.xlsx>)` é o caminho de
