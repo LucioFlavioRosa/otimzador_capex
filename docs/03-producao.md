@@ -177,7 +177,7 @@ import sys; sys.path.append("/Workspace/Repos/otimizador/Otimizador_Producao")
 from otimizador.aplicacao.job_databricks import rodar
 ```
 
-**(b) Wheel** *(Fase 5, ainda não feita)* — empacotar o pacote `otimizador/` como wheel e
+**(b) Wheel** *(não faz parte do pacote)* — empacotar o pacote `otimizador/` como wheel e
 instalá-lo como library do job. A reorganização em camadas já deixou o código no formato que o
 wheel espera (um pacote com `__init__.py` em cada camada); o que falta é o `pyproject.toml`, o
 build e a publicação. É a forma recomendada para produção de verdade; enquanto não existe, (a)
@@ -274,11 +274,11 @@ SELECT params_extra FROM public.otim_meta WHERE run_id = :run;
   possivelmente aprovado, e a cópia congelada daquela rodada junto. Ver `02-integracao-backend.md`
   §2.7.
 
-> Até 2026-08-06 a idempotência valia só para o Postgres: a gravação no blob era
-> `mode("append")` particionada por `run_id`, então o retry **duplicava** as linhas do parquet
-> em vez de substituí-las. Como o blob é escrito antes da transação do Postgres, bastava a
-> rodada falhar depois dele. Corrigido em `persistencia.salvar` (apaga a partição antes de
-> gravar) e coberto por `tests/test_producao.py`.
+> **A cópia em blob é idempotente como o Postgres.** `persistencia.salvar` apaga a partição
+> `run_id=<rid>` antes de gravar, em vez de acrescentar arquivos dentro dela — o retry
+> substitui a rodada. Isso importa porque o blob é escrito **antes** da transação do Postgres:
+> sem a substituição, uma rodada que falhasse depois dele deixaria o parquet em dobro. Coberto
+> por `tests/test_producao.py`.
 
 ### Apagar uma rodada
 
@@ -334,8 +334,8 @@ Comece por aí.
 
 | Pendência | Impacto | Quando encarar |
 |---|---|---|
-| Wheel + CI (Fase 5) | instalação manual; sem gate automático de código | antes do primeiro deploy "de verdade" |
-| Fase 2b (dict de DataFrames) | `.xlsx` temporário no driver | depois de validado em produção |
+| Wheel + CI | instalação manual; sem gate automático de código | antes do primeiro deploy "de verdade" |
+| `ler_banco` aceitar DataFrames | `.xlsx` temporário no driver | depois de validado em produção |
 | `input` sem discriminador de unidade | cada rodada lê o cadastro inteiro | quando o cadastro nacional crescer |
 | `psycopg2.sql.Identifier` | schema/tabela/coluna por f-string | manutenção |
 | Testes de `publicacao.py` nunca executados | ver `04-testes-executar.md` §4 | **primeira coisa** ao subir o banco |

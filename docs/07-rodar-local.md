@@ -299,7 +299,8 @@ que fica para o Databricks é infraestrutura.
    resultados que parecem estranhos.
 4. Nível B — smoke test e os 12 testes de integração. **Reporte o que quebrar**: são os
    primeiros a rodar contra um banco.
-5. Ler [`REVISAO_PRODUCAO.md`](../REVISAO_PRODUCAO.md) — os achados e o que ficou pendente.
+5. Ler [`05-testes-cobertura.md`](05-testes-cobertura.md) — o que a suíte garante e o que ela
+   não alcança.
 6. Nível C e, só então, Databricks.
 
 ---

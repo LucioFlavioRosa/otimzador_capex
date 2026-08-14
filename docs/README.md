@@ -30,12 +30,9 @@ documento 7 roda em minutos e só precisa de Python.
 ## Documentos irmãos, fora desta pasta
 
 - [`../README_producao.md`](../README_producao.md) — runbook curto, uma página.
-- [`../Plano_Producao_Databricks.md`](../Plano_Producao_Databricks.md) — o plano em fases,
-  com as decisões de arquitetura e o checklist de revisão.
-- [`../REVISAO_PRODUCAO.md`](../REVISAO_PRODUCAO.md) — revisão de código: achados por
-  severidade, os diffs aplicados e o que **continua sem verificação**. Leia antes de mexer em
-  `publicacao.py`, `job_databricks.py` ou no DDL.
 - [`../tests/README.md`](../tests/README.md) — detalhe das fixtures e dos testes do motor.
+- [`historico/`](historico/README.md) — o plano original e o relatório de revisão. São registro
+  de decisões de um momento, **não** fonte do que o pacote faz hoje.
 
 ## Subindo o banco pela primeira vez
 

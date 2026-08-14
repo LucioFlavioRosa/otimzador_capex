@@ -12,7 +12,7 @@
 > correspondente nessa estrutura. A **Fase 5** aqui descrita (wheel com módulos `engine`/
 > `dados`/`job`) foi substituída: o recorte real é o das quatro camadas.
 >
-> Para o estado atual: [`docs/README.md`](docs/README.md) (documentação por assunto) e
+> Para o estado atual: [`docs/README.md`](../README.md) (documentação por assunto) e
 > [`REVISAO_PRODUCAO.md`](REVISAO_PRODUCAO.md) (o que foi revisado, corrigido e o que
 > continua sem prova de execução). O checklist de revisão do §6 aqui foi respondido item a
 > item na §3 da REVISAO.

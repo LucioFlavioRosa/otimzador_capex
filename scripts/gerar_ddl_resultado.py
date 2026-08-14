@@ -41,8 +41,10 @@ FIXTURES = [
     ("tests/fixtures/banco_teste_CTS_poc_v2.xlsx", dict(usar_cts=True)),
     ("tests/fixtures/banco_teste_CTS_poc_v2.xlsx", dict(usar_cts=True, ete_faseada=True)),
     ("tests/fixtures/banco_fixture_testes.xlsx",   dict(unidade="u1")),
-    ("tests/fixtures/banco_fixture_classe.xlsx",   dict(incluir_industrial=True)),
-    ("tests/fixtures/banco_fixture_classe.xlsx",   dict(incluir_industrial=False)),
+    # Os dois lados do recorte da meta: a fixture `classe` tem colunas residenciais, e
+    # rodar os dois garante que o DDL gerado cobre as colunas que cada modo publica.
+    ("tests/fixtures/banco_fixture_classe.xlsx",   dict(cobertura_so_residencial=False)),
+    ("tests/fixtures/banco_fixture_classe.xlsx",   dict(cobertura_so_residencial=True)),
 ]
 
 CABECALHO = """-- ============================================================================

@@ -86,9 +86,8 @@ somar.** As quatro colunas do recorte são `universo_ligacoes_residencial`,
 
 **O RECORTE ACABA NA COBERTURA.** Receita, VPL, vazão e CAPEX usam o total nos dois modos —
 quem paga a conta é a ligação, seja de casa ou de fábrica, e a indústria manda esgoto que a
-ETE precisa tratar. A versão anterior deste recorte (`INCLUIR_INDUSTRIAL`, com colunas
-`*_industrial`) descontava a parcela de ligações, receita **e vazão**; ela não existe mais, e
-as colunas foram removidas do DDL pela migração `ddl_input_migracao_02.sql`.
+ETE precisa tratar. Não há coluna `*_industrial` no cadastro: a parcela residencial é medida,
+não deduzida por subtração.
 
 **(b2) A sub-bacia diz o que atende SEM a CTS.**
 
@@ -106,16 +105,13 @@ independentes: `universo_ligacoes_com_cts`, `ligacoes_atuais_com_cts`,
 `universo_economias_com_cts`, `economias_atuais_com_cts`, e as quatro
 `*_residencial_com_cts` equivalentes.
 
-**NÃO é a soma das duas linhas.** Era o que o motor fazia, e a ligação da área sobreposta,
-que está nas duas, era contada duas vezes: o universo da meta crescia sozinho ao desligar a
-CTS, e a cobertura piorava sem nenhuma obra ter mudado. O valor apurado vai ser **menor** que
-a soma onde houver sobreposição real.
+**NÃO é a soma das duas linhas.** A ligação da área sobreposta está nas duas, e somá-las a
+contaria duas vezes: onde houver sobreposição real, o valor apurado é **menor** que a soma.
 
-**Ligado e desligado deixam de ter a mesma demanda**, e isso é correto: sem o coletor, a
-parte da área que só ele alcançava não é atendida por ninguém.
+**Ligado e desligado não têm a mesma demanda**, e isso é correto: sem o coletor, a parte da
+área que só ele alcançava não é atendida por ninguém.
 
-**Vazão, receita e população NÃO são somadas** — e isso é regra, não pendência. Elas são
-**dado da sub-bacia**, e o motor não inventa o valor delas para o cenário sem coletor: se
+**Vazão, receita e população NÃO são somadas.** Elas são **dado da sub-bacia**, e o motor não inventa o valor delas para o cenário sem coletor: se
 desligar a CTS muda a vazão da sub-bacia, **quem atualiza a base é quem cadastra**. A escolha
 de considerar ou não a CTS não mexe em receita.
 
@@ -241,7 +237,7 @@ Três regras, validadas em `job_databricks._params_para_ler_banco`:
 | Chave | Default | O que faz |
 |---|---|---|
 | `USUARIO` | `"job-databricks"` | vai para `otim_meta.usuario`, aparece no histórico |
-| `MAX_TIME_S` | `300` | tempo máximo do solver, por rodada |
+| `MAX_TIME_S` | `300` | tempo máximo do solver, por rodada. É o default **do job**, usado só quando a rodada não traz o valor; o backend sempre envia o dele no `params` |
 | `WORKERS` | `8` | threads do CP-SAT |
 
 ---
@@ -428,7 +424,7 @@ Demais consequências para o backend:
 | `ERRO`: `run_request nao encontrada para run_id=...` | job disparado antes do `INSERT`, ou `run_id` diferente | inserir e **commitar** antes de disparar |
 | `ERRO`: `falha ao ler input.<tabela>` | permissão, rede, ou tabela ausente que não é opcional | ver `03-producao.md` §7 |
 | `ERRO`: `input incompleto no Postgres: falta 'subbacia_operacional'` | cadastro vazio para a unidade | conferir o carregamento do `input` |
-| `FALHAU_QUALIDADE` com "duplicatas nas PKs" | cadastro duplicado gerou resultado duplicado | conferir `input` e o `run_diagnostico` |
+| `FALHOU_QUALIDADE` com "duplicatas nas PKs" | cadastro duplicado gerou resultado duplicado | conferir `input` e o `run_diagnostico` |
 | Plano vazio, mas `SUCESSO` | "Plano não-vazio" é **aviso**, não crítico | decisão de negócio: se plano vazio deve barrar, mudar o nível em `qualidade.py` |
 | Resultado diferente do notebook com o mesmo cadastro | `params` diferente — tipicamente `FOCO_COBERTURA` ou `ETE_FASEADA` | comparar `otim_meta.params_extra` das duas rodadas |
 
