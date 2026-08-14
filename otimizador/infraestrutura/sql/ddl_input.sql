@@ -99,17 +99,38 @@ CREATE TABLE IF NOT EXISTS input.subbacia_operacional (
     populacao_atual                 double precision,
     populacao_novas_obras           double precision,
     potencial_crescimento           double precision,
-    universo_ligacoes_industrial    integer,
-    ligacoes_atuais_industrial      integer,
-    receita_faturada_industrial     double precision,
-    receita_arrecadada_industrial   double precision,
-    vazao_contribuicao_industrial   double precision
+    universo_ligacoes_residencial   integer,
+    ligacoes_atuais_residencial     integer,
+    universo_economias_residencial  integer,
+    economias_atuais_residencial    integer,
+    -- O que a sub-bacia atende QUANDO A CTS NAO EXISTE: o exclusivo dela mais a area
+    -- sobreposta com o coletor. So a sub-bacia tem estas colunas; a CTS nao precisa.
+    universo_ligacoes_com_cts               integer,
+    ligacoes_atuais_com_cts                 integer,
+    universo_economias_com_cts              integer,
+    economias_atuais_com_cts                integer,
+    universo_ligacoes_residencial_com_cts   integer,
+    ligacoes_atuais_residencial_com_cts     integer,
+    universo_economias_residencial_com_cts  integer,
+    economias_atuais_residencial_com_cts    integer
 );
-COMMENT ON COLUMN input.subbacia_operacional.universo_ligacoes_industrial IS
-    'PARCELA industrial, JA CONTIDA no total. As colunas sem sufixo (universo_ligacoes, '
-    'receita_*, vazao_contribuicao) sao o TOTAL = residencial + industrial. Com '
-    'INCLUIR_INDUSTRIAL=True usa-se o total como esta; com False, residencial = total '
-    '- industrial. Nunca somar.';
+COMMENT ON COLUMN input.subbacia_operacional.universo_ligacoes_com_cts IS
+    'O que a sub-bacia atende SEM a CTS: exclusivo dela + area sobreposta com o coletor. '
+    'NAO e a soma das duas linhas — somar conta a sobreposicao duas vezes. Lida so quando '
+    'a rodada tem usar_cts=false; com a CTS ligada, a sobreposicao esta nos numeros dela.';
+COMMENT ON COLUMN input.subbacia_operacional.universo_ligacoes_residencial IS
+    'PARCELA residencial, JA CONTIDA no total, e MEDIDA (nao derivada). As colunas sem '
+    'sufixo sao o TOTAL = residencial + industrial. Nunca somar as duas.';
+COMMENT ON COLUMN input.subbacia_operacional.ligacoes_atuais_residencial IS
+    'Residenciais JA atendidas. Com COBERTURA_SO_RESIDENCIAL=True e a base da meta; o '
+    'total continua sendo quem paga a receita.';
+COMMENT ON COLUMN input.subbacia_operacional.universo_economias_residencial IS
+    'Universo de economias residenciais. Usada quando a cidade mede cobertura em '
+    'economias (input.cidade_operacional.unidade_cobertura).';
+COMMENT ON COLUMN input.subbacia_operacional.economias_atuais_residencial IS
+    'Economias residenciais ja atendidas. O RECORTE ACABA NA COBERTURA: receita, VPL, '
+    'vazao e CAPEX seguem no total em qualquer modo. Cidade que mede em POPULACAO ignora '
+    'estas colunas — industria nao mora, entao a populacao ja e residencial.';
 
 -- aba do motor: componentes-subbacias-capex
 CREATE TABLE IF NOT EXISTS input.componentes_subbacias_capex (
@@ -213,11 +234,10 @@ CREATE TABLE IF NOT EXISTS input.cts_operacional (
     populacao_atual                 double precision,
     populacao_novas_obras           double precision,
     potencial_crescimento           double precision,
-    universo_ligacoes_industrial    integer,
-    ligacoes_atuais_industrial      integer,
-    receita_faturada_industrial     double precision,
-    receita_arrecadada_industrial   double precision,
-    vazao_contribuicao_industrial   double precision
+    universo_ligacoes_residencial   integer,
+    ligacoes_atuais_residencial     integer,
+    universo_economias_residencial  integer,
+    economias_atuais_residencial    integer
 );
 
 -- aba do motor: subbacia-cts  (pareamento 1:1)

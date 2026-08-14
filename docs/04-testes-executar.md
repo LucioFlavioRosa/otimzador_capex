@@ -28,15 +28,15 @@ Se você não vai rodar o pipeline, o mínimo para a suíte é:
 
 ```
 $ python -m pytest tests/
-120 collected
-107 passed, 13 skipped in 3.4s
+127 collected
+114 passed, 13 skipped in 3.6s
 ```
 
 | Arquivo | Testes |
 |---|---|
 | `test_nucleo.py` | 9 |
 | `test_desempate_por_retorno.py` | 13 |
-| `test_cts.py` | 9 |
+| `test_cts.py` | 13 |
 | `test_classe.py` | 7 |
 | `test_derivadas.py` | 2 |
 | `test_regressao_golden.py` | 4 |
@@ -54,9 +54,9 @@ $ python -m pytest tests/
 
 | Ambiente | Resultado | Quem pula a mais |
 |---|---|---|
-| completo | **107 passed, 13 skipped** | — |
-| sem `ortools` | 84 passed, **36 skipped** | +23: os 13 de `test_desempate_por_retorno.py` menos 1 que não pede solver, 7 de `test_producao.py` (`rodar()` usa o CP-SAT), 2 de `test_regressao_golden.py` e 2 de `test_nucleo.py` |
-| sem `matplotlib` | 97 passed, **23 skipped** | +10, todos de `test_producao.py` — a materialização importa o `dashboard` |
+| completo | **114 passed, 13 skipped** | — |
+| sem `ortools` | 91 passed, **36 skipped** | +23: os 13 de `test_desempate_por_retorno.py` menos 1 que não pede solver, 7 de `test_producao.py` (`rodar()` usa o CP-SAT), 2 de `test_regressao_golden.py` e 2 de `test_nucleo.py` |
+| sem `matplotlib` | 104 passed, **23 skipped** | +10, todos de `test_producao.py` — a materialização importa o `dashboard` |
 
 **Nenhum skip é aceitável em vermelho:** se um teste *falhar* em vez de pular, é bug.
 
@@ -159,7 +159,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - run: pip install -r requirements-prod.txt
-      - run: pytest -q tests/          # 107 passed, 13 skipped
+      - run: pytest -q tests/          # 114 passed, 13 skipped
 
   com-postgres:
     runs-on: ubuntu-latest

@@ -68,17 +68,17 @@ def load_unidade(banco, unidade, usar_cts=True):
     return silent(M.ler_banco, banco, unidade=unidade, usar_cts=usar_cts)
 
 
-def load_fixture(usar_cts=True, unidade=UNIDADE_FIXTURE, incluir_industrial=True):
+def load_fixture(usar_cts=True, unidade=UNIDADE_FIXTURE, cobertura_so_residencial=False):
     """Banco fixo SEM CTS (com mix de WACC) que acompanha a suite — sempre presente."""
     M = engine()
     return silent(M.ler_banco, BANK_FIXTURE, unidade=unidade, usar_cts=usar_cts,
-                  incluir_industrial=incluir_industrial)
+                  cobertura_so_residencial=cobertura_so_residencial)
 
 
-def load_classe(incluir_industrial=True):
+def load_classe(cobertura_so_residencial=False):
     """Banco com parcela industrial (b1/b3) e cobertura por economias (c1) e populacao (c2)."""
     M = engine()
-    return silent(M.ler_banco, BANK_CLASSE, incluir_industrial=incluir_industrial)
+    return silent(M.ler_banco, BANK_CLASSE, cobertura_so_residencial=cobertura_so_residencial)
 
 
 def build_all(cen):

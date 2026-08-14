@@ -190,8 +190,8 @@ def _variacoes(dimensao, base):
     if dimensao == "cts":
         return [("com CTS", {"usar_cts": True}), ("sem CTS", {"usar_cts": False})]
     if dimensao == "industrial":
-        return [("res+industrial", {"incluir_industrial": True}),
-                ("so residencial", {"incluir_industrial": False})]
+        return [("cobertura total", {"cobertura_so_residencial": False}),
+                ("cobertura so residencial", {"cobertura_so_residencial": True})]
     raise SystemExit(f"dimensao desconhecida: {dimensao} "
                      f"(use: foco, orcamento, cts, industrial)")
 
@@ -268,7 +268,7 @@ def main(argv=None):
     ap.add_argument("--unidade", default=None)
     ap.add_argument("--base-receita", default=None, choices=["arrecadada", "faturada"])
     ap.add_argument("--sem-cts", action="store_true", help="usar_cts=False")
-    ap.add_argument("--so-residencial", action="store_true", help="incluir_industrial=False")
+    ap.add_argument("--so-residencial", action="store_true", help="cobertura_so_residencial=True")
     ap.add_argument("--ete-faseada", action="store_true", help="cada ETE vira K obras-modulo")
 
     ap.add_argument("--build-all", action="store_true",
@@ -305,7 +305,7 @@ def main(argv=None):
     if a.sem_cts:
         params["usar_cts"] = False
     if a.so_residencial:
-        params["incluir_industrial"] = False
+        params["cobertura_so_residencial"] = True
     if a.ete_faseada:
         params["ete_faseada"] = True
 

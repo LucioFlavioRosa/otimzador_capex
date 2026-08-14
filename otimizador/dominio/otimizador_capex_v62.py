@@ -32,7 +32,7 @@ class Cidade:
 class Obra:
     def __init__(self,id,tipo,no=None,sistema=None,capex_comp=None,opex_ano=0,prazo_exec=0,
                  prazo_inicio=0,obrigatoria=False,proibida_ate=0,ligacoes=0,ticket_mes=0,preco_ligacao=0,
-                 arrec_dir=1.0,arrec_ind=1.0,lag=1,maturacao=2,wacc=None):
+                 arrec_dir=1.0,arrec_ind=1.0,lag=1,maturacao=2,wacc=None,ligacoes_cobertura=None):
         self.id=id;self.tipo=tipo;self.no=no;self.sistema=sistema
         self.capex_comp={k:float(v or 0) for k,v in (capex_comp or {}).items()}
         self.capex=sum(self.capex_comp.values());self.opex_ano=float(opex_ano or 0)
@@ -48,6 +48,18 @@ class Obra:
         # CAPEX = quantidade x preco unitario (quando o banco informa os dois)
         self.quantidade=None; self.preco_unitario=None; self.unidade=None
         self.lig=float(ligacoes or 0);self.ticket_mes=float(ticket_mes or 0);self.preco_ligacao=float(preco_ligacao or 0)
+        # DUAS QUANTIDADES, e nao uma. `lig` e o que a obra HABILITA — dela sai a
+        # receita, e ela e sempre o TOTAL. `lig_cob` e o que a obra conta para a
+        # COBERTURA, que pode ser so a parcela residencial.
+        #
+        # Antes eram a mesma coisa, e por isso o recorte residencial nao tinha como
+        # existir sem mexer no VPL: subtrair industria de `lig` derrubava receita
+        # junto. Sao numeros de moedas diferentes — um e faturamento, o outro e
+        # meta contratual — e passaram a ser dois campos.
+        #
+        # `None` (o caso normal) faz os dois iguais: sem recorte, cobertura e
+        # receita contam as mesmas ligacoes.
+        self.lig_cob=float(ligacoes_cobertura) if ligacoes_cobertura not in (None,"") else self.lig
         self.arrec_dir=float(arrec_dir or 1);self.arrec_ind=float(arrec_ind or 1)
         self.lag=int(lag or 1);self.mat=int(maturacao or 2)
         self.wacc=(float(wacc) if wacc not in (None,"") else None)   # WACC do componente (custo de capital); None -> usa taxa da regional
@@ -368,7 +380,7 @@ def _fator_por_cobertura_realizada(cen,elig,inicio,anos):
         for o in cen.coletas:
             if not elig.get(o.id) or cen.cidade_da(o)!=cid: continue
             _fu=_uf(cen,o.no)
-            for Y in range(max(0,inicio[o.id]//12),anos): arr[Y]+=o.lig*_fu
+            for Y in range(max(0,inicio[o.id]//12),anos): arr[Y]+=o.lig_cob*_fu
         out[cid]=[_faixa_fator(fx,(arr[Y]/mx) if mx>0 else 0.0) for Y in range(anos)]
     return out
 
@@ -529,7 +541,7 @@ def avaliar(cen,plano):
             if not elig.get(o.id): continue
             sis=cen.nos[o.no].cidade; yop=chain_last.get(o.id,0)//12; arr=cob_sis[sis]
             for Y in range(anos):
-                if Y>=yop: arr[Y]+=o.lig*_uf(cen,o.no)
+                if Y>=yop: arr[Y]+=o.lig_cob*_uf(cen,o.no)
         _ab=getattr(cen,"ano_base",{})
         for sis,alvos in metas.items():
             _base=_ab.get(sis, min(_ab.values()) if _ab else 0)
@@ -552,8 +564,11 @@ def avaliar(cen,plano):
     vpl_obj=vpl-peso*_penal
     cob={}
     for cid,c in cen.cidades.items():
-        add=sum(o.lig for o in cen.coletas if elig.get(o.id,False) and cen.cidade_da(o)==cid)
-        nao=sum(o.lig for o in cen.coletas if o.necessaria and plano.get(o.id) is not None
+        # `lig_cob`, e nao `lig`: este bloco compara com `meta_aumento`, que esta na moeda
+        # da COBERTURA. Somar ligacoes totais contra uma meta residencial daria a meta por
+        # cumprida com ligacao que ela nao conta.
+        add=sum(o.lig_cob for o in cen.coletas if elig.get(o.id,False) and cen.cidade_da(o)==cid)
+        nao=sum(o.lig_cob for o in cen.coletas if o.necessaria and plano.get(o.id) is not None
                 and cen.cidade_da(o)==cid and not elig.get(o.id,False))
         cob[cid]={"adicionado":add,"nao_tratado":nao,"cob_final":c.cob_atual+add,"meta":c.meta_aumento,
                   "pct":(add/c.meta_aumento if c.meta_aumento>0 else 1.0),"ok":add>=c.meta_aumento-1e-9}
@@ -834,7 +849,7 @@ def listar_unidades(path):
     return [(u, uni_nome.get(u,u), uni_reg.get(u,""), len(v["cidades"]), v["sub"]) for u,v in sorted(out.items())]
 
 
-def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_faseada=False, metas_cobertura=None, peso_cobertura=0.0, foco_cobertura=None, penalidade_cobertura="meta+cobertura", data_inicio=None, orcamento_total=None, peso_cidade=None, regional=None, unidade=None, curva_adocao="scurve", base_receita="arrecadada", anos_extra_conclusao=3, usar_cts=True, incluir_industrial=True):
+def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_faseada=False, metas_cobertura=None, peso_cobertura=0.0, foco_cobertura=None, penalidade_cobertura="meta+cobertura", data_inicio=None, orcamento_total=None, peso_cidade=None, regional=None, unidade=None, curva_adocao="scurve", base_receita="arrecadada", anos_extra_conclusao=3, usar_cts=True, cobertura_so_residencial=False):
     """Le o banco no formato de JUNCOES (banco_dados_v3): hierarquia em tabelas de ligacao,
     sistema-topologia (jusante), subbacia-operacional (=sub-bacia), componentes/ete-capex,
     regional-operacional. Cobertura e CONCESSAO por CIDADE (cidade-operacional + metas-cobertura por cidade). Horizonte do sistema = fim da sua cidade; taxa por REGIONAL."""
@@ -980,53 +995,122 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     _cts_op={d.get("cts"): d for d in L("cts-operacional") if d.get("cts")}
     _cts_dep={d.get("sub_bacia"): d.get("cts") for d in L("subbacia-cts") if d.get("sub_bacia") and d.get("cts")}
     _cts_ids_all=set(_cts_op)
-    # ---- CLASSE DA DEMANDA: residencial x industrial ------------------------------
-    # As colunas *_industrial guardam a PARCELA industrial (subconjunto do total). So ha dado de
-    # LIGACAO para a industria. incluir_industrial=False => simula SO residencial:
-    #   - LIGACOES, RECEITA, VAZAO: subtrai a parcela industrial direta;
-    #   - ECONOMIAS: a industria conta como economia, mas nao ha dado -> estima pela PROPORCAO das
-    #     ligacoes industriais (mantem a densidade economias/ligacao); assim a cobertura medida em
-    #     economias tambem fica residencial;
-    #   - POPULACAO: industria ~ 0 habitantes -> o universo de populacao ja e residencial (nao mexe).
-    # CAPEX nao muda (vem de quantidade x preco). Banco sem as colunas => industrial 0 => sem efeito.
-    _IND_PARES=(("universo_ligacoes","universo_ligacoes_industrial"),
-                ("ligacoes_atuais","ligacoes_atuais_industrial"),
-                ("receita_faturada_media_mensal","receita_faturada_industrial"),
-                ("receita_arrecadada_media_mensal","receita_arrecadada_industrial"),
-                ("vazao_contribuicao","vazao_contribuicao_industrial"))
-    if not incluir_industrial:
-        def _sub_ind(_d):
-            _ul0=num(_d.get("universo_ligacoes")); _la0=num(_d.get("ligacoes_atuais"))   # ORIGINAIS
-            _tem=False
-            for _tot,_ind in _IND_PARES:
-                if _d.get(_tot) is not None and _d.get(_ind) not in (None,""):
-                    _d[_tot]=max(0.0, num(_d.get(_tot))-num(_d.get(_ind))); _tem=True
-            # economias residenciais = economias * (1 - fracao industrial das ligacoes)
-            _uli=num(_d.get("universo_ligacoes_industrial")); _lai=num(_d.get("ligacoes_atuais_industrial"))
-            if _tem and _d.get("universo_economias") is not None and _ul0>0 and _uli>0:
-                _d["universo_economias"]=max(0.0, num(_d.get("universo_economias"))*(1.0-_uli/_ul0))
-            if _tem and _d.get("economias_atuais") is not None and _la0>0 and _lai>0:
-                _d["economias_atuais"]=max(0.0, num(_d.get("economias_atuais"))*(1.0-_lai/_la0))
-            return _tem
-        _n_ind=sum(1 for _d in subop.values() if _sub_ind(_d))   # subop e do banco todo (filtro de unidade e depois)
-        for _d in _cts_op.values(): _sub_ind(_d)
-        print(f"  [info] CLASSE = SO RESIDENCIAL: parcela industrial subtraida (ligacoes/receita/vazao; "
-              f"economias por proporcao; populacao intacta) — {_n_ind} sub-bacia(s) com industria no banco"
-              if _n_ind else "  [info] CLASSE = SO RESIDENCIAL: banco sem colunas *_industrial (nada a subtrair)")
-    _CTS_SUM=["universo_ligacoes","ligacoes_atuais","ligacoes_novas_obras",
-              "universo_economias","economias_atuais","economias_novas_obras",
-              "universo_populacao","populacao_atual","populacao_novas_obras",
+    # ---- RECORTE DA COBERTURA: total x so residencial -----------------------------
+    # `cobertura_so_residencial=True` mede a cobertura CONTANDO SO LIGACOES E ECONOMIAS
+    # RESIDENCIAIS. O universo residencial e as residenciais atendidas vem do banco em
+    # COLUNA PROPRIA (`*_residencial`), medidas — nao sao mais deduzidas subtraindo uma
+    # parcela industrial nem estimadas por proporcao, como na versao anterior.
+    #
+    # O RECORTE ACABA NA COBERTURA. Receita, VPL, vazao, CAPEX e OPEX seguem no TOTAL, em
+    # qualquer modo: quem paga a conta e a ligacao, seja ela de casa ou de fabrica. A meta
+    # contratual e que e residencial. Sao moedas diferentes, e o motor passou a carregar as
+    # duas (ver `Obra.lig` x `Obra.lig_cob`).
+    #
+    # POPULACAO nao tem versao residencial: industria nao mora, entao o universo de
+    # populacao ja e residencial por natureza.
+    _COB_LIG=("universo_ligacoes_residencial","ligacoes_atuais_residencial","ligacoes_novas_obras_residencial")
+    _COB_ECO=("universo_economias_residencial","economias_atuais_residencial","economias_novas_obras_residencial")
+    _cob_res=bool(cobertura_so_residencial)
+    if _cob_res:
+        # SEM AS COLUNAS, NAO HA RECORTE A FAZER — e cair no total EM SILENCIO seria o pior
+        # desfecho: a rodada responderia "so residencial" medindo todo mundo, e ninguem
+        # notaria. Entao o modo se desliga com aviso alto, e o `milp_status` nao muda porque
+        # o plano e o mesmo de uma rodada sem recorte.
+        _tem_res=sum(1 for _d in list(subop.values())+list(_cts_op.values())
+                     if _d.get("universo_ligacoes_residencial") not in (None,""))
+        if not _tem_res:
+            print("  [ALERTA] COBERTURA SO RESIDENCIAL pedida, mas o banco nao tem "
+                  "`universo_ligacoes_residencial` em nenhuma sub-bacia. A cobertura foi medida "
+                  "no TOTAL — o recorte NAO foi aplicado.")
+            _cob_res=False
+        else:
+            _falta=[_k for _k,_d in list(subop.items())+list(_cts_op.items())
+                    if _d.get("universo_ligacoes_residencial") in (None,"")]
+            if _falta:
+                print(f"  [aviso] {len(_falta)} sub-bacia(s)/CTS sem coluna residencial: a cobertura delas "
+                      f"cai para o TOTAL. Ex.: {_falta[:3]}")
+            print(f"  [info] COBERTURA = SO RESIDENCIAL ({_tem_res} sub-bacia(s)/CTS com dado residencial). "
+                  "Receita, VPL, vazao e CAPEX seguem no total.")
+    def _usa_res(_sbk):
+        """Esta sub-bacia mede a cobertura pelas colunas residenciais?
+
+        Tres condicoes, e a terceira e a que custou um teste: CIDADE QUE MEDE EM
+        POPULACAO FICA DE FORA. Industria nao mora, entao o universo de populacao ja e
+        residencial — trocar o universo de ligacoes por residencial e depois multiplicar
+        pela densidade populacional (habitantes por ligacao TOTAL) devolveria uma
+        populacao menor que a real, que nao e a populacao de ninguem.
+
+        `sis_de_sb` so existe mais adiante nesta funcao; como isto aqui e chamado depois,
+        o nome resolve na CHAMADA e nao na definicao.
+        """
+        if not _cob_res: return False
+        if (subop.get(_sbk) or {}).get(_COB_LIG[0]) in (None,""): return False
+        _u=str((cidop.get(sis_cid.get(sis_de_sb.get(_sbk))) or {}).get("unidade_cobertura") or "ligacoes")
+        return not _u.strip().lower().startswith("pop")
+    # ---- CTS DESLIGADA: o que a sub-bacia absorve ---------------------------------
+    # As colunas de LIGACAO e ECONOMIA da sub-bacia sao o que pertence EXCLUSIVAMENTE a
+    # ela. A CTS cobre uma area que se SOBREPOE a essa — e a sobreposicao e contada uma
+    # vez so, na entidade que a atende em cada cenario:
+    #
+    #   usar_cts=True   a CTS atende a sobreposicao; ela esta nos numeros da CTS, que
+    #                   entra como no proprio. A sub-bacia usa as colunas exclusivas.
+    #   usar_cts=False  o coletor nao existe; quem atende a sobreposicao e a sub-bacia,
+    #                   e o total dela vem das colunas `*_com_cts` — exclusiva + sobreposta.
+    #
+    # POR QUE NAO SOMAR AS DUAS LINHAS, que era o que se fazia: a ligacao da area
+    # sobreposta esta nas duas, entao a soma a CONTA DUAS VEZES. O universo da meta
+    # crescia sozinho ao desligar a CTS, e a cobertura piorava sem nenhuma obra ter
+    # mudado. As colunas `_com_cts` vem da origem ja consolidadas e nao tem esse defeito.
+    _CTS_CONSOLIDADO=[("universo_ligacoes","universo_ligacoes_com_cts"),
+                      ("ligacoes_atuais","ligacoes_atuais_com_cts"),
+                      ("universo_economias","universo_economias_com_cts"),
+                      ("economias_atuais","economias_atuais_com_cts"),
+                      (_COB_LIG[0],"universo_ligacoes_residencial_com_cts"),
+                      (_COB_LIG[1],"ligacoes_atuais_residencial_com_cts"),
+                      (_COB_ECO[0],"universo_economias_residencial_com_cts"),
+                      (_COB_ECO[1],"economias_atuais_residencial_com_cts")]
+    # O QUE CONTINUA SENDO SOMADO. Populacao, vazao e receita nao tem coluna consolidada
+    # na origem — entao seguem como sempre: a linha da CTS entra por soma. Onde houver
+    # sobreposicao real elas ficam com a dupla contagem que as de cima deixaram de ter, e
+    # isso e uma incoerencia CONHECIDA entre grandezas, nao um esquecimento. Vazao dobrada
+    # superdimensiona a ETE; e o preco de nao perder a demanda do coletor.
+    _CTS_SUM=["universo_populacao","populacao_atual","populacao_novas_obras",
               "vazao_contribuicao","receita_faturada_media_mensal","receita_arrecadada_media_mensal"]
     if usar_cts:                                   # LIGADO: CTS entra como no proprio (dados operacionais)
         for _c,_row in _cts_op.items(): subop[_c]=_row
-    else:                                          # DESLIGADO: soma a demanda da CTS na sub-bacia pareada
+    else:                                          # DESLIGADO: a sub-bacia absorve a CTS pareada
+        _sem_consolidado=[]
         for _sb,_c in _cts_dep.items():
             if _sb not in subop or _c not in _cts_op: continue
             _s=subop[_sb]; _k=_cts_op[_c]
             _us=num(_s.get("universo_ligacoes")); _uc=num(_k.get("universo_ligacoes"))
             _ps=num(_s.get("potencial_crescimento"),1.0); _pk=num(_k.get("potencial_crescimento"),1.0)
-            if _us+_uc>1e-9: _s["potencial_crescimento"]=(_us*_ps+_uc*_pk)/(_us+_uc)   # media ponderada pelo universo
+            # POTENCIAL: media ponderada pelo que a sub-bacia PASSA A ATENDER.
+            #
+            # Com a coluna consolidada o peso da parte que vem do coletor e a
+            # SOBREPOSICAO (consolidado - exclusiva), e nao o universo inteiro da CTS: a
+            # area que so ela alcancava nao e atendida por ninguem, e nao deve pesar num
+            # potencial que multiplica um universo do qual ela nao faz parte.
+            #
+            # Sem a coluna, o peso continua sendo o universo da CTS, que e o que a soma
+            # de fato incorpora — e e o que preserva o total entre ligado e desligado.
+            _cons=num(_s.get(_CTS_CONSOLIDADO[0][1])) if _s.get(_CTS_CONSOLIDADO[0][1]) not in (None,"") else None
+            _peso=(max(0.0,_cons-_us) if _cons is not None else _uc)
+            if _us+_peso>1e-9: _s["potencial_crescimento"]=(_us*_ps+_peso*_pk)/(_us+_peso)
             for _f in _CTS_SUM: _s[_f]=num(_s.get(_f))+num(_k.get(_f))
+            # SEM A COLUNA CONSOLIDADA, volta a somar. E a degradacao honesta: perder a
+            # demanda da CTS seria pior que conta-la duas vezes, e o aviso diz qual dos
+            # dois comportamentos a rodada teve.
+            if _s.get(_CTS_CONSOLIDADO[0][1]) in (None,""):
+                _sem_consolidado.append(_sb)
+                for _exc,_ in _CTS_CONSOLIDADO: _s[_exc]=num(_s.get(_exc))+num(_k.get(_exc))
+                continue
+            for _exc,_tot in _CTS_CONSOLIDADO:
+                if _s.get(_tot) not in (None,""): _s[_exc]=num(_s.get(_tot))
+        if _sem_consolidado:
+            print(f"  [aviso] {len(_sem_consolidado)} sub-bacia(s) com CTS pareada mas sem "
+                  f"`universo_ligacoes_com_cts`: a demanda foi SOMADA, o que conta a area "
+                  f"sobreposta duas vezes. Ex.: {_sem_consolidado[:3]}")
     # ---- UNIDADES ----------------------------------------------------------------
     # LIGACOES e ECONOMIAS vem SEMPRE da base comercial (Databricks) para toda sub-bacia.
     # POPULACAO e opcional e entra por input do usuario, quando precisa.
@@ -1036,13 +1120,20 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     # PRECOS (ticket medio e taxa de ligacao) sao SEMPRE POR LIGACAO — nao ha conversao.
     # A densidade entra apenas na COBERTURA, quando a cidade mede em economias ou populacao.
     def _densidade(_d, alvo):
-        """<alvo> por ligacao, derivado da base. 0.0 se nao houver como derivar."""
+        """<alvo> por ligacao, derivado da base. 0.0 se nao houver como derivar.
+
+        `economias_res` e a densidade RESIDENCIAL — economias residenciais por ligacao
+        residencial. Ela existe porque a conversao tem de ficar na mesma moeda da
+        cobertura: converter ligacao residencial com densidade TOTAL misturaria as duas
+        e daria uma cobertura que nao e nem uma coisa nem outra.
+        """
         pares = (("universo_economias","universo_ligacoes"),
                  ("economias_atuais","ligacoes_atuais"),
                  ("economias_novas_obras","ligacoes_novas_obras")) if alvo=="economias" else \
+                (tuple(zip(_COB_ECO,_COB_LIG)) if alvo=="economias_res" else
                 (("universo_populacao","universo_ligacoes"),
                  ("populacao_atual","ligacoes_atuais"),
-                 ("populacao_novas_obras","ligacoes_novas_obras"))
+                 ("populacao_novas_obras","ligacoes_novas_obras")))
         for _a,_b in pares:
             _va,_vb=_d.get(_a),_d.get(_b)
             if _va is not None and _vb is not None and num(_vb)>0 and num(_va)>0:
@@ -1051,7 +1142,10 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     _dv_ec=_dv_pp=0; _dens_sb={}; _div_dens=[]; _uni_obs=[]
     for _sbk,_d in subop.items():
         _dens=_densidade(_d,"economias"); _dpop=_densidade(_d,"populacao")
-        _dens_sb[_sbk]={"economias":_dens,"populacao":_dpop}
+        # A residencial cai para a total quando nao ha dado residencial — e a mesma
+        # degradacao por sub-bacia que o aviso do recorte anuncia.
+        _dres=_densidade(_d,"economias_res") or _dens
+        _dens_sb[_sbk]={"economias":_dens,"populacao":_dpop,"economias_res":_dres}
         # coluna antiga de densidade, se ainda existir, vira CONFERENCIA (nao entra no calculo)
         for _colv,_der,_rot in ((_d.get("densidade_economias"),_dens,"economias"),
                                 (_d.get("densidade_populacao", _d.get("habitantes_por_ligacao")),_dpop,"populacao")):
@@ -1091,7 +1185,12 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     for _sbk,_d in subop.items():
         for _un,_at,_nv in (("universo_ligacoes","ligacoes_atuais","ligacoes_novas_obras"),
                             ("universo_economias","economias_atuais","economias_novas_obras"),
-                            ("universo_populacao","populacao_atual","populacao_novas_obras")):
+                            ("universo_populacao","populacao_atual","populacao_novas_obras"),
+                            # As residenciais derivam pela MESMA regra (universo - atuais), e nao
+                            # por proporcao do total: o dado agora e medido dos dois lados, e
+                            # derivar diferente faria a cobertura residencial ter uma aritmetica
+                            # propria — que e como a versao anterior errava.
+                            _COB_LIG, _COB_ECO):
             if _d.get(_un) in (None,"") or _d.get(_at) in (None,""): continue
             _der=max(0.0, num(_d.get(_un))-num(_d.get(_at)))
             _antigo=_d.get(_nv)
@@ -1169,7 +1268,10 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         _rec_esc=_rec_fat if _BREC=="faturada" else _rec_arr
         _la_atu=num(so.get("ligacoes_atuais"))
         _ticket_der=(_rec_esc/_la_atu) if _la_atu>1e-9 else 0.0
-        lig_novas=max(0.0,num(so.get("ligacoes_novas_obras")))   # ligacoes habilitadas pelas OBRAS
+        lig_novas=max(0.0,num(so.get("ligacoes_novas_obras")))   # ligacoes habilitadas pelas OBRAS -> RECEITA
+        # O que a obra conta para a META. Igual ao de cima sem recorte; com recorte, so as
+        # residenciais. A sub-bacia sem coluna residencial cai para o total.
+        lig_cob=max(0.0,num(so.get(_COB_LIG[2]))) if _usa_res(sb) else lig_novas
         for x in lst:                                  # UMA OBRA POR COMPONENTE (desacoplados)
             nome=str(x.get("componente","")); pe=num(x.get("tempo_execucao"))
             # CAPEX pode vir DECOMPOSTO em quantidade x preco unitario; se vier, ele manda.
@@ -1190,7 +1292,7 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                     obrigatoria=cal2py(x.get("obra_obrigatoria_ano"), _ab),
                     proibida_ate=cal2py(x.get("obra_proibida_ate"), _ab))
             if eh_lig:
-                kw.update(ligacoes=lig_novas,ticket_mes=_ticket_der,
+                kw.update(ligacoes=lig_novas,ligacoes_cobertura=lig_cob,ticket_mes=_ticket_der,
                           preco_ligacao=num(so.get("preco_por_ligacao")),arrec_dir=adir,arrec_ind=aind,lag=lag,maturacao=mat)
             _o=Obra(f"{code}_{sb}",tipo,**kw)
             _o.quantidade=_q; _o.preco_unitario=_pu
@@ -1303,7 +1405,10 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     for _sb2,_sis2 in sis_de_sb.items():
         _cn2=cid_name[sis_cid[_sis2]]; _u2=_unid.get(_cn2,"ligacoes"); _so2=subop.get(_sb2,{})
         _dd=_dens_sb.get(_sb2,{})
-        if   _u2=="economias": _f2=(_dd.get("economias") or 0.0) or 1.0
+        # Com o recorte ligado a conversao usa a densidade RESIDENCIAL: o numerador e o
+        # denominador ja estao em ligacoes residenciais.
+        if   _u2=="economias" and _usa_res(_sb2): _f2=(_dd.get("economias_res") or 0.0) or 1.0
+        elif _u2=="economias": _f2=(_dd.get("economias") or 0.0) or 1.0
         elif _u2=="populacao": _f2=(_dd.get("populacao") or 0.0) or 1.0
         else: _f2=1.0
         if _u2=="populacao" and not (_dd.get("populacao") or 0.0):
@@ -1331,9 +1436,14 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         if _sb not in sis_de_sb: continue
         _sn=cid_name[sis_cid[sis_de_sb[_sb]]]                              # agrega por CIDADE
         _so=subop.get(_sb,{})
-        _un=_so.get("universo_ligacoes")                                  # UNIVERSO total (denominador da meta)
-        _la=_so.get("ligacoes_atuais")                                    # ligacoes ja atendidas (base)
-        _no=num(_so.get("ligacoes_novas_obras",0))
+        # O TRIPLO DA COBERTURA. Com o recorte ligado sao as colunas residenciais; a
+        # sub-bacia que nao tiver a residencial cai para a total, que e a degradacao
+        # anunciada no aviso la de cima.
+        _cu,_ca,_cn=(_COB_LIG if _usa_res(_sb)
+                     else ("universo_ligacoes","ligacoes_atuais","ligacoes_novas_obras"))
+        _un=_so.get(_cu)                                                  # UNIVERSO (denominador da meta)
+        _la=_so.get(_ca)                                                  # ligacoes ja atendidas (base)
+        _no=num(_so.get(_cn,0))
         _pt=_pot(_so); _pot_sb[_sb]=_pt
         if _pt!=1.0: _n_pot+=1
         _un_ef=num(_un)*_pt                                              # universo COM potencial de crescimento
@@ -1445,6 +1555,9 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     for _n in cen.nos.values(): _n.is_cts=(_n.id in cen.cts_ids)
     _cts_na_uni={_c for _s,_c in _cts_dep.items() if _s in cen.nos}   # pares cuja sub-bacia esta no escopo
     if _cts_na_uni:
+        # A descricao do modo desligado mudou junto com o comportamento: ela dizia
+        # "demanda somada", e somar era exatamente o que passou a NAO acontecer quando ha
+        # coluna consolidada. Log que descreve o codigo antigo e pior que log nenhum.
         print(f"  [info] CTS: {len(_cts_na_uni)} nesta unidade ({len(_cts_ids_all)} no banco) -> usar_cts={usar_cts} "
-              f"({'entram como nos proprios' if usar_cts else 'demanda somada na sub-bacia pareada'})")
+              f"({'entram como nos proprios' if usar_cts else 'a sub-bacia absorve a pareada (colunas *_com_cts)'})")
     return cen

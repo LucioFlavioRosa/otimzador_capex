@@ -72,16 +72,74 @@ isso as FKs existem.
 todas as reconciliações** do portão de qualidade, porque o resultado é internamente coerente
 com um cadastro que de fato tem duas obras.
 
-**(b) A parcela industrial já está no total.**
+**(b) A parcela residencial já está no total.**
 
 | coluna | leitura |
 |---|---|
 | `universo_ligacoes` = 1000 | **total** (residencial + industrial) |
-| `universo_ligacoes_industrial` = 80 | **parcela**, já contida nos 1000 |
+| `universo_ligacoes_residencial` = 920 | **parcela**, já contida nos 1000 |
 
-`INCLUIR_INDUSTRIAL=True` → usa 1000. `False` → usa 1000 − 80 = 920. **Nunca somar.** Vale
-igual para `receita_faturada_*`, `receita_arrecadada_*`, `ligacoes_atuais_*` e
-`vazao_contribuicao_*`.
+`COBERTURA_SO_RESIDENCIAL=False` (padrão) → a meta usa 1000. `True` → usa 920. **Nunca
+somar.** As quatro colunas do recorte são `universo_ligacoes_residencial`,
+`ligacoes_atuais_residencial`, `universo_economias_residencial` e
+`economias_atuais_residencial`.
+
+**O RECORTE ACABA NA COBERTURA.** Receita, VPL, vazão e CAPEX usam o total nos dois modos —
+quem paga a conta é a ligação, seja de casa ou de fábrica, e a indústria manda esgoto que a
+ETE precisa tratar. A versão anterior deste recorte (`INCLUIR_INDUSTRIAL`, com colunas
+`*_industrial`) descontava a parcela de ligações, receita **e vazão**; ela não existe mais, e
+as colunas foram removidas do DDL pela migração `ddl_input_migracao_02.sql`.
+
+**(b2) A sub-bacia diz o que atende SEM a CTS.**
+
+As colunas de ligação e economia da sub-bacia são o que pertence **exclusivamente** a ela. A
+CTS cobre uma área que se **sobrepõe** a essa, e a sobreposição é contada **uma vez só**, na
+entidade que a atende em cada cenário:
+
+| rodada | quem atende a sobreposição | o que o motor lê na sub-bacia |
+|---|---|---|
+| `usar_cts=true` | a CTS (que entra como nó próprio, com as obras dela) | as colunas exclusivas |
+| `usar_cts=false` | a sub-bacia (as obras da CTS ficam de fora) | as colunas `*_com_cts` |
+
+São oito, e elas cruzam com o recorte residencial porque as duas escolhas são
+independentes: `universo_ligacoes_com_cts`, `ligacoes_atuais_com_cts`,
+`universo_economias_com_cts`, `economias_atuais_com_cts`, e as quatro
+`*_residencial_com_cts` equivalentes.
+
+**NÃO é a soma das duas linhas.** Era o que o motor fazia, e a ligação da área sobreposta,
+que está nas duas, era contada duas vezes: o universo da meta crescia sozinho ao desligar a
+CTS, e a cobertura piorava sem nenhuma obra ter mudado. O valor apurado vai ser **menor** que
+a soma onde houver sobreposição real.
+
+**Ligado e desligado deixam de ter a mesma demanda**, e isso é correto: sem o coletor, a
+parte da área que só ele alcançava não é atendida por ninguém.
+
+**População, vazão e receita continuam somadas** da linha da CTS — não há coluna consolidada
+para elas. Onde houver sobreposição real elas ficam com a dupla contagem que as de cima
+deixaram de ter. É uma incoerência **conhecida** entre grandezas, não um esquecimento: vazão
+dobrada superdimensiona a ETE, e é o preço de não perder a demanda do coletor.
+
+Enquanto a exportação não trouxer os valores apurados, as oito são derivadas
+(`exclusiva + CTS pareada`, que reproduz exatamente a soma antiga) por
+`dev/preencher_sobreposicao_cts.py`, e a planilha marca isso em `sobreposicao_origem`
+(`derivado_soma` | `sem_cts`). Coluna ausente faz o motor voltar a somar, avisando.
+
+**População não tem versão residencial**: indústria não mora, então `universo_populacao` já é
+residencial. Cidade que mede a meta em população ignora as quatro colunas acima.
+
+**O QUE A EXPORTAÇÃO PRECISA PRODUZIR.** As quatro colunas são **medida**, não derivação: a
+apuração de quantas ligações e economias são residenciais é da base comercial, e é ela que
+deve preenchê-las. Enquanto a exportação não as trouxer, elas são derivadas
+(`total − parcela industrial`, economias pela proporção das ligações) por
+`dev/preencher_recorte_residencial.py` no repositório do backend, e a planilha marca isso na
+coluna de controle `residencial_origem` (`derivado` | `sem_industria`). **Valor derivado não
+é medição** — quem usa o resultado de uma rodada só-residencial precisa saber qual dos dois
+está lendo.
+
+Coluna ausente ou vazia **não é tratada como zero**: o motor avisa em voz alta
+(`[ALERTA] COBERTURA SO RESIDENCIAL pedida, mas o banco nao tem ...`) e mede a cobertura no
+total. Cair no total em silêncio seria pior — a rodada responderia "só residencial" medindo
+todo mundo.
 
 **(c) Colunas derivadas são recalculadas.** `ligacoes_novas_obras = universo − atuais` é
 **derivado pelo motor**; o valor gravado no banco é ignorado. Não adianta "corrigir" na mão.
@@ -109,7 +167,7 @@ VALUES (
     "ORCAMENTO": {"2026": 50000000, "2027": 50000000, "2028": 40000000},
     "BASE_RECEITA": "arrecadada",
     "USAR_CTS": true,
-    "INCLUIR_INDUSTRIAL": true,
+    "COBERTURA_SO_RESIDENCIAL": false,
     "FOCO_COBERTURA": 0.3,
     "USUARIO": "fulano@aegea.com.br"}'::jsonb,
   'backend-aks'
@@ -154,7 +212,7 @@ Três regras, validadas em `job_databricks._params_para_ler_banco`:
 | `BASE_RECEITA` | `"arrecadada"` \| `"faturada"` | `"arrecadada"` | base de receita da rodada |
 | `CURVA_ADOCAO` | `"scurve"` \| … | `"scurve"` | ritmo de adesão das ligações novas |
 | `USAR_CTS` | bool | `true` | CTS como nó próprio |
-| `INCLUIR_INDUSTRIAL` | bool | `true` | `true` = usa o total; `false` = total − industrial |
+| `COBERTURA_SO_RESIDENCIAL` | bool | `false` | `false` = meta medida nos totais; `true` = medida nas colunas `*_residencial`. Não afeta receita, VPL nem vazão |
 | `ETE_FASEADA` | bool | **`false`** | cada ETE vira K obras-módulo |
 | `ETE_FIXO` | bool | `false` | ETE fora da decisão |
 | `METAS_COBERTURA` | dict | `None` | sobrescreve as metas do cadastro |
