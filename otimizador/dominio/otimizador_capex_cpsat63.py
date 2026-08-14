@@ -421,12 +421,30 @@ def _desconsidera_obrig_fora_janela(cen, verbose=True):
               f"{fora[:8]}"+(" ..." if len(fora)>8 else ""))
     return fora
 
-def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s=5, col_grid=12):
+def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s=5, col_grid=12,
+                         gap_relativo=0.0, gap_retorno=None):
     """Decomposicao por CIDADE.
     FASE 0 (prioridade ABSOLUTA): construir o MAXIMO de obras OBRIGATORIAS que couber no teto
     anual, ANTES de qualquer obra opcional. Esse piso e travado nas fases seguintes.
-    Depois: foco>=0.95 -> LEXICOGRAFICO (metas 1o; 2a prioridade = cobertura/VPL); foco<0.95 -> ponderado.
-    Se alguma obrigatoria nao couber no orcamento, avisa exatamente quais (sem estourar o teto)."""
+    Depois: foco>=0.95 -> LEXICOGRAFICO (metas 1o; cobertura 2o; RETORNO como desempate);
+    foco<0.95 -> ponderado.
+    Se alguma obrigatoria nao couber no orcamento, avisa exatamente quais (sem estourar o teto).
+
+    gap_relativo: folga da fase de COBERTURA (0.02 = 2%). 0.0 (default) mantem o comportamento
+    historico: so para por prova exata ou por relogio. Sem ele uma fase pode gastar o teto
+    inteiro PROVANDO um plano que ja tinha achado — medido numa unidade de 67 cidades: 339s de
+    720s, com o resultado final a 0,006% do limite superior provado.
+
+    gap_retorno: folga da fase de DESEMPATE POR RETORNO. `None` (default) usa o mesmo valor de
+    `gap_relativo`, preservando quem chamava so com um numero.
+
+    OS DOIS SAO MOEDAS DIFERENTES, e por isso sao dois. `gap_relativo` afrouxa a COBERTURA e,
+    com ela, o `C*` que a fase seguinte trava — e `C*` e a base de comparacao entre cenarios.
+    Medido em tres execucoes identicas com gap unico de 2%: `C*` variou entre 670.092, 670.193 e
+    673.202, e o VPL acompanhou na direcao contraria (181,70 / 175,02 / 171,56 Mi). Ja
+    `gap_retorno` nao mexe em `C*`: ele so decide quanto tempo se gasta refinando o VPL DENTRO
+    da cobertura ja travada. Quem compara cenarios quer o primeiro apertado; quem quer
+    velocidade quer o segundo folgado."""
     from ortools.sat.python import cp_model
     import time as _t
     reg=list(cen.regionais)[0]; anos=cen.anos
@@ -505,12 +523,50 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
 
     _foco=getattr(cen,"foco_cobertura",None); _modo=str(getattr(cen,"penalidade_cobertura","meta+cobertura")).lower()
 
+    #: Teto de tempo do conjunto das fases. As fracoes historicas somavam 1,35x o
+    #: `max_time_s` pedido — o nome ja nao era o que sugeria. A fase 3 NAO aumenta esse
+    #: teto: ela recebe o que sobrar dele, entao o custo maximo continua o mesmo de antes.
+    _TETO=float(max_time_s)*1.35
+    _t0=_t.time()
+
+    _gap_ret=gap_relativo if gap_retorno is None else gap_retorno
+
+    def _sem_solucao(st):
+        """O solver terminou SEM incumbente?
+
+        `INFEASIBLE` era o unico status barrado, e nao e o unico que nao produz
+        solucao: `UNKNOWN` e `MODEL_INVALID` tambem chegam sem nada. Com eles,
+        `ObjectiveValue()` devolve lixo e `_extrai` monta `sel_final` PARCIAL —
+        uma cidade sem coluna selecionada. O reparo do teto anual, mais abaixo,
+        percorre TODAS as cidades indexando `sel[g]`, e a primeira ausente estoura
+        com `KeyError: '<nome da cidade>'`. Foi exatamente o sintoma observado em
+        producao, e o nome da cidade era so a ordem de iteracao.
+        """
+        return st not in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
+    def _sv(segundos, com_gap=True, gap=None):
+        """Solver de uma fase. Fabrica UNICA: um criterio novo repetido em cinco lugares e
+        um criterio que alguem esquece no sexto.
+
+        `com_gap=False` nas fases de PRIORIDADE ABSOLUTA (obrigatorias e metas). Um gap ali
+        e perda de garantia, nao de tempo: com 2%, a fase 0 pode parar num incumbente de 99
+        obrigatorias com bound 100 e travar `_obrig_floor(99)` — e dai em diante o plano
+        deixa uma obrigatoria de fora COMO SE ela nao coubesse. O mesmo vale para `Mstar`.
+        Essas duas fases provam em ~1s mesmo com 67 cidades, entao a folga nao compraria
+        tempo nenhum; so compraria risco."""
+        g=gap_relativo if gap is None else gap
+        s=cp_model.CpSolver()
+        s.parameters.max_time_in_seconds=max(5.0,float(segundos))
+        s.parameters.num_search_workers=int(workers)
+        if com_gap and g and g>0: s.parameters.relative_gap_limit=float(g)
+        return s
+
     def _fase0_obrig():
         """FASE 0: maximiza o nº de obras OBRIGATORIAS construidas respeitando o teto anual."""
         md,y=_base(); V,C=_obrig_terms(y)
         if not V: return 0
         md.Maximize(cp_model.LinearExpr.WeightedSum(V,C))
-        sv=cp_model.CpSolver(); sv.parameters.max_time_in_seconds=max(5.0,float(max_time_s)*0.35); sv.parameters.num_search_workers=int(workers)
+        sv=_sv(max_time_s*0.35,com_gap=False)      # prioridade ABSOLUTA: sem folga
         st=sv.Solve(md)
         return int(round(sv.ObjectiveValue())) if st in (cp_model.OPTIMAL,cp_model.FEASIBLE) else 0
 
@@ -519,27 +575,83 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
         if _foco is not None and _foco>=0.95:               # lexicografico
             if _modo=="ligacao":
                 md,y=_base(); _obrig_floor(md,y,O0); OV,OC=_termos(y,5); md.Maximize(cp_model.LinearExpr.WeightedSum(OV,OC))
-                sv=cp_model.CpSolver(); sv.parameters.max_time_in_seconds=float(max_time_s); sv.parameters.num_search_workers=int(workers)
-                st=sv.Solve(md); return _extrai(sv,y),st,"-",5,O0
+                sv=_sv(max_time_s)
+                st=sv.Solve(md)
+                if _sem_solucao(st): return None,st,"-",5,O0
+                return _extrai(sv,y),st,"-",5,O0
             md1,y1=_base(); _obrig_floor(md1,y1,O0); MV,MC=_termos(y1,4)
             md1.Minimize(cp_model.LinearExpr.WeightedSum(MV,MC) if MV else 0)
-            s1=cp_model.CpSolver(); s1.parameters.max_time_in_seconds=max(5.0,float(max_time_s)*0.4); s1.parameters.num_search_workers=int(workers)
+            s1=_sv(max_time_s*0.4,com_gap=False)   # prioridade ABSOLUTA: sem folga
             st1=s1.Solve(md1)
-            if st1==cp_model.INFEASIBLE: return None,st1,None,None,O0
+            if _sem_solucao(st1): return None,st1,None,None,O0
             Mstar=int(round(s1.ObjectiveValue())) if MV else 0
             md2,y2=_base(); _obrig_floor(md2,y2,O0); MV2,MC2=_termos(y2,4)
             if MV2: md2.Add(cp_model.LinearExpr.WeightedSum(MV2,MC2) <= Mstar)
             _idx2=3 if _modo=="meta" else 5
             OV,OC=_termos(y2,_idx2); md2.Maximize(cp_model.LinearExpr.WeightedSum(OV,OC))
-            sv=cp_model.CpSolver(); sv.parameters.max_time_in_seconds=max(5.0,float(max_time_s)*0.6); sv.parameters.num_search_workers=int(workers)
+            sv=_sv(max_time_s*0.6)
             st=sv.Solve(md2)
-            if st==cp_model.INFEASIBLE: return None,st,Mstar,_idx2,O0
-            return _extrai(sv,y2),st,Mstar,_idx2,O0
+            if _sem_solucao(st): return None,st,Mstar,_idx2,O0
+            plano2=_extrai(sv,y2)                            # o plano da fase 2, se a 3 falhar
+
+            # ---------------- FASE 3: DESEMPATE POR RETORNO ----------------
+            # Sem ela o VPL e SORTEIO. A fase 2 maximiza cobertura; ao chegar em C* devolve o
+            # primeiro plano que o atinge, e entre um que rende 154 Mi e outro que rende 118 Mi
+            # com a MESMA cobertura o solver nao tem preferencia. Qual dos dois sai depende da
+            # ordem de busca e do timing das threads do portfolio paralelo.
+            #
+            # Medido na uA3 (67 cidades, 120 Mi/ano): duas execucoes com parametros IDENTICOS
+            # devolveram VPL de 154,89 Mi e 150,27 Mi. Isso nao e vies — vies preservaria a
+            # ordem entre cenarios. E DISPERSAO, que embaralha. Para quem usa o otimizador para
+            # COMPARAR planos, e o defeito que importa: dois cenarios so sao distinguiveis se a
+            # diferenca entre eles superar a dispersao.
+            #
+            # SEMPRE VIAVEL: o plano da fase 2 satisfaz `>= Cstar`. O teste de status existe
+            # para o caso de ela nao terminar a tempo — devolve o plano da fase 2, nunca pior
+            # que o comportamento anterior.
+            #
+            # SO quando a fase 2 otimizou COBERTURA (idx 5). No modo "meta" ela ja maximiza o
+            # proprio VPL (idx 3), e desempatar VPL por VPL seria gastar tempo para nada.
+            if _idx2==5 and st in (cp_model.OPTIMAL,cp_model.FEASIBLE):
+                Cstar=int(round(sv.ObjectiveValue()))
+                md3,y3=_base(); _obrig_floor(md3,y3,O0)
+                MV3,MC3=_termos(y3,4)
+                if MV3: md3.Add(cp_model.LinearExpr.WeightedSum(MV3,MC3) <= Mstar)
+                CV,CC=_termos(y3,5)
+                if CV: md3.Add(cp_model.LinearExpr.WeightedSum(CV,CC) >= Cstar)
+                # idx 3 = VPL PURO, e nao idx 0 (`vpl_obj`). `vpl_obj = vpl - peso*penalidade`,
+                # e com `foco_cobertura=1.0` o motor faz `peso = capex_total*10` — dez vezes o
+                # CAPEX da unidade. Maximizar idx 0 aqui seria re-otimizar COBERTURA sob outro
+                # nome, dominada por esse peso, com a cobertura ja travada pela restricao acima.
+                # O desempate tem de olhar o retorno, que e tambem o numero que a tela mostra.
+                RV,RC=_termos(y3,3)
+                if RV:
+                    md3.Maximize(cp_model.LinearExpr.WeightedSum(RV,RC))
+                    # `_gap_ret`, e nao `gap_relativo`: aqui a folga e de RETORNO, e o que
+                    # ela compra e TEMPO. Afrouxa-la nao mexe em `C*`, ja travado acima.
+                    #
+                    # SE NAO SOBROU TEMPO, a fase nao roda. `_sv` tem piso de 5s, entao
+                    # pedir "o que sobrou" quando nao sobrou nada ainda custaria 5s e
+                    # furaria o teto que este calculo existe para respeitar. Pular e
+                    # seguro: `plano2` ja e um plano completo.
+                    _resta=_TETO-(_t.time()-_t0)
+                    if _resta<5.0: return plano2,st,Mstar,_idx2,O0
+                    s3=_sv(_resta,gap=_gap_ret)
+                    st3=s3.Solve(md3)
+                    if st3 in (cp_model.OPTIMAL,cp_model.FEASIBLE):
+                        if verbose: print(f"  [info] desempate por retorno: cobertura travada em {Cstar}")
+                        # STATUS = O PIOR DAS DUAS FASES. A fase 3 so prova otimalidade do
+                        # RETORNO dado C*; quem determinou C* foi a fase 2. Devolver OPTIMAL
+                        # porque a fase 3 provou, com a fase 2 tendo parado por tempo ou por
+                        # gap, e dizer "otimo" sobre uma cobertura que ninguem provou.
+                        final=cp_model.OPTIMAL if (st==cp_model.OPTIMAL and st3==cp_model.OPTIMAL) else cp_model.FEASIBLE
+                        return _extrai(s3,y3),final,Mstar,_idx2,O0
+            return plano2,st,Mstar,_idx2,O0
         # ponderado
         md,y=_base(); _obrig_floor(md,y,O0); OV,OC=_termos(y,0); md.Maximize(cp_model.LinearExpr.WeightedSum(OV,OC))
-        sv=cp_model.CpSolver(); sv.parameters.max_time_in_seconds=float(max_time_s); sv.parameters.num_search_workers=int(workers)
+        sv=_sv(max_time_s)
         st=sv.Solve(md)
-        if st==cp_model.INFEASIBLE: return None,st,None,0,O0
+        if _sem_solucao(st): return None,st,None,0,O0
         return _extrai(sv,y),st,None,0,O0
 
     plano,st,Mstar,idx2,O0=_run()
