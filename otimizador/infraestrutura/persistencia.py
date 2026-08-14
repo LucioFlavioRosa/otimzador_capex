@@ -467,6 +467,10 @@ def _tabela_sistema(cen, res, rid):
             "ete_nova": bool(getattr(e, "nova", False)) if e else None,
             "ete_responsavel": (e.responsavel if e else None),
             "folga_inicial": folga, "capacidade_modulo": capmod,
+            # Viaja no SNAPSHOT da rodada, e nao e lida do cadastro na hora de exibir: o
+            # cadastro muda, a rodada e imutavel. Uma rodada de 2026 tem de continuar
+            # dizendo a unidade que ela usou.
+            "unidade_capacidade": (getattr(e, "unidade_capacidade", None) if e else None),
             "capex_modulo": float(getattr(e, "capex_modulo", 0.0) or 0.0) if e else None,
             "capex_terreno": float(getattr(e, "capex_terreno", 0.0) or 0.0) if e else None,
             "modulos_disponiveis": len(mods), "modulos_construidos": len(constr),

@@ -1320,6 +1320,12 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         eo.wacc_origem=("proprio" if (d.get("wacc") is not None and str(d.get("wacc")).strip()!="")
                         else ("wacc_medio" if eo.wacc is not None else "ausente"))
         eo.cap_modulo=num(d.get("capacidade_por_modulo"),0.0)   # vazao por modulo
+        # A UNIDADE DA CAPACIDADE VEM DO CADASTRO, e nao e fixada aqui. A soma nao muda
+        # com ela — o que muda e como o numero se le, e trocar a unidade de medida no
+        # cadastro nao pode exigir mexer no motor nem na tela. Vazia = a rodada nao
+        # declarou unidade, e quem mostra o numero mostra sem sufixo, em vez de inventar.
+        eo.unidade_capacidade=(str(d.get("unidade_capacidade")).strip()
+                               if str(d.get("unidade_capacidade") or "").strip() else None)
         eo.capex_modulo=num(d.get("capex_por_modulo"),0.0)      # CAPEX por modulo
         _oc=d.get("capacidade_ociosa")                                    # CAPACIDADE OCIOSA = nominal - vazao de operacao
         _nom=d.get("capacidade_nominal_atual"); _opv=d.get("vazao_de_operacao_atual")

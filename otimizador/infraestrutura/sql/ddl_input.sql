@@ -160,6 +160,11 @@ COMMENT ON COLUMN input.componentes_subbacias_capex.capex IS
 CREATE TABLE IF NOT EXISTS input.ete_capex (
     ete_id                   text PRIMARY KEY,
     capacidade_por_modulo    double precision,
+    -- A unidade em que `capacidade_por_modulo` e as demais capacidades desta ETE estao
+    -- expressas. NAO e fixa no codigo de proposito: trocar a unidade de medida e mudanca
+    -- de cadastro, e a soma nao muda com ela — so a leitura do numero. Vazia = a tela
+    -- mostra a quantidade sem sufixo, em vez de inventar uma unidade.
+    unidade_capacidade       text,
     capex_por_modulo         double precision,
     opex_por_modulo          double precision,
     tempo_predecessoras      integer,
