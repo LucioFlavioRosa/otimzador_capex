@@ -114,10 +114,19 @@ a soma onde houver sobreposição real.
 **Ligado e desligado deixam de ter a mesma demanda**, e isso é correto: sem o coletor, a
 parte da área que só ele alcançava não é atendida por ninguém.
 
-**População, vazão e receita continuam somadas** da linha da CTS — não há coluna consolidada
-para elas. Onde houver sobreposição real elas ficam com a dupla contagem que as de cima
-deixaram de ter. É uma incoerência **conhecida** entre grandezas, não um esquecimento: vazão
-dobrada superdimensiona a ETE, e é o preço de não perder a demanda do coletor.
+**Vazão, receita e população NÃO são somadas** — e isso é regra, não pendência. Elas são
+**dado da sub-bacia**, e o motor não inventa o valor delas para o cenário sem coletor: se
+desligar a CTS muda a vazão da sub-bacia, **quem atualiza a base é quem cadastra**. A escolha
+de considerar ou não a CTS não mexe em receita.
+
+Duas consequências que valem estar escritas:
+
+- **A ETE é dimensionada com a vazão que estiver na base.** Se ela não refletir o cenário sem
+  coletor, falta o esgoto que vinha por ele. O motor avisa em toda rodada que absorve uma CTS.
+- **A receita da linha da CTS não é herdada.** Sem o coletor, as ligações que ele atenderia
+  são ligadas pelas obras da sub-bacia e cobradas pelo **ticket dela**. O ticket em si não
+  muda com a escolha: ele sai da base comercial da própria sub-bacia (`receita ÷ ligações
+  atuais exclusivas`), e o número consolidado não entra nessa divisão.
 
 Enquanto a exportação não trouxer os valores apurados, as oito são derivadas
 (`exclusiva + CTS pareada`, que reproduz exatamente a soma antiga) por

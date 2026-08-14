@@ -19,16 +19,20 @@
 -- coletor, a parte da área que só ele alcançava não é atendida por ninguém — o que é o
 -- comportamento correto, e não uma perda.
 --
--- POPULAÇÃO, VAZÃO E RECEITA continuam sendo somadas da linha da CTS: não há coluna
--- consolidada para elas na origem. Onde houver sobreposição real, elas ficam com a
--- dupla contagem que as de cima deixaram de ter. É uma incoerência CONHECIDA entre
--- grandezas, registrada aqui e no motor — não um esquecimento.
+-- VAZÃO, RECEITA E POPULAÇÃO NÃO são somadas da linha da CTS. Elas são dado da
+-- sub-bacia: se desligar o coletor muda a vazão dela, quem atualiza a base é quem
+-- cadastra. A escolha de considerar ou não a CTS não mexe em receita — sem o coletor,
+-- as ligações que ele atenderia são cobradas pelo ticket da sub-bacia que as absorve.
 --
 -- MIGRAÇÃO DO DADO. As colunas nascem preenchidas com `exclusiva + CTS pareada`, que é
--- exatamente o que o motor já somava. Ou seja: **esta migração não muda resultado
--- nenhum**. Ela só move a conta de dentro do motor para dentro do banco, para que o dia
--- em que a origem trouxer o valor apurado — que vai ser MENOR onde houver sobreposição
--- real — a mudança seja só de dado, não de código.
+-- exatamente o que o motor somava em ligações e economias. Nessas duas, portanto, a
+-- migração é inerte: o número lido é o mesmo que era calculado. Ela move a conta de
+-- dentro do motor para dentro do banco, para que o dia em que a origem trouxer o valor
+-- apurado — MENOR onde houver sobreposição real — a mudança seja só de dado.
+--
+-- O QUE MUDA DE RESULTADO não é esta migração, é a regra nova do motor: vazão, receita e
+-- população deixaram de ser somadas. Uma rodada sem CTS passa a usar a vazão e a receita
+-- que estiverem na base da sub-bacia.
 --
 -- Sub-bacia sem CTS pareada recebe a própria quantidade: sem coletor não há
 -- sobreposição, e `com_cts` é igual a `exclusiva`.
