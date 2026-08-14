@@ -102,8 +102,22 @@ CREATE TABLE IF NOT EXISTS input.subbacia_operacional (
     universo_ligacoes_residencial   integer,
     ligacoes_atuais_residencial     integer,
     universo_economias_residencial  integer,
-    economias_atuais_residencial    integer
+    economias_atuais_residencial    integer,
+    -- O que a sub-bacia atende QUANDO A CTS NAO EXISTE: o exclusivo dela mais a area
+    -- sobreposta com o coletor. So a sub-bacia tem estas colunas; a CTS nao precisa.
+    universo_ligacoes_com_cts               integer,
+    ligacoes_atuais_com_cts                 integer,
+    universo_economias_com_cts              integer,
+    economias_atuais_com_cts                integer,
+    universo_ligacoes_residencial_com_cts   integer,
+    ligacoes_atuais_residencial_com_cts     integer,
+    universo_economias_residencial_com_cts  integer,
+    economias_atuais_residencial_com_cts    integer
 );
+COMMENT ON COLUMN input.subbacia_operacional.universo_ligacoes_com_cts IS
+    'O que a sub-bacia atende SEM a CTS: exclusivo dela + area sobreposta com o coletor. '
+    'NAO e a soma das duas linhas — somar conta a sobreposicao duas vezes. Lida so quando '
+    'a rodada tem usar_cts=false; com a CTS ligada, a sobreposicao esta nos numeros dela.';
 COMMENT ON COLUMN input.subbacia_operacional.universo_ligacoes_residencial IS
     'PARCELA residencial, JA CONTIDA no total, e MEDIDA (nao derivada). As colunas sem '
     'sufixo sao o TOTAL = residencial + industrial. Nunca somar as duas.';

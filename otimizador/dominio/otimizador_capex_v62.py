@@ -1047,24 +1047,70 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         if (subop.get(_sbk) or {}).get(_COB_LIG[0]) in (None,""): return False
         _u=str((cidop.get(sis_cid.get(sis_de_sb.get(_sbk))) or {}).get("unidade_cobertura") or "ligacoes")
         return not _u.strip().lower().startswith("pop")
-    _CTS_SUM=["universo_ligacoes","ligacoes_atuais","ligacoes_novas_obras",
-              "universo_economias","economias_atuais","economias_novas_obras",
-              "universo_populacao","populacao_atual","populacao_novas_obras",
-              "vazao_contribuicao","receita_faturada_media_mensal","receita_arrecadada_media_mensal",
-              # As residenciais somam junto quando a CTS e absorvida pela sub-bacia pareada
-              # (`usar_cts=False`). Ficar de fora faria a cobertura residencial ignorar a
-              # demanda da CTS — que e justamente a que a soma existe para nao perder.
-              *_COB_LIG[:2], *_COB_ECO[:2]]
+    # ---- CTS DESLIGADA: o que a sub-bacia absorve ---------------------------------
+    # As colunas de LIGACAO e ECONOMIA da sub-bacia sao o que pertence EXCLUSIVAMENTE a
+    # ela. A CTS cobre uma area que se SOBREPOE a essa — e a sobreposicao e contada uma
+    # vez so, na entidade que a atende em cada cenario:
+    #
+    #   usar_cts=True   a CTS atende a sobreposicao; ela esta nos numeros da CTS, que
+    #                   entra como no proprio. A sub-bacia usa as colunas exclusivas.
+    #   usar_cts=False  o coletor nao existe; quem atende a sobreposicao e a sub-bacia,
+    #                   e o total dela vem das colunas `*_com_cts` — exclusiva + sobreposta.
+    #
+    # POR QUE NAO SOMAR AS DUAS LINHAS, que era o que se fazia: a ligacao da area
+    # sobreposta esta nas duas, entao a soma a CONTA DUAS VEZES. O universo da meta
+    # crescia sozinho ao desligar a CTS, e a cobertura piorava sem nenhuma obra ter
+    # mudado. As colunas `_com_cts` vem da origem ja consolidadas e nao tem esse defeito.
+    _CTS_CONSOLIDADO=[("universo_ligacoes","universo_ligacoes_com_cts"),
+                      ("ligacoes_atuais","ligacoes_atuais_com_cts"),
+                      ("universo_economias","universo_economias_com_cts"),
+                      ("economias_atuais","economias_atuais_com_cts"),
+                      (_COB_LIG[0],"universo_ligacoes_residencial_com_cts"),
+                      (_COB_LIG[1],"ligacoes_atuais_residencial_com_cts"),
+                      (_COB_ECO[0],"universo_economias_residencial_com_cts"),
+                      (_COB_ECO[1],"economias_atuais_residencial_com_cts")]
+    # O QUE CONTINUA SENDO SOMADO. Populacao, vazao e receita nao tem coluna consolidada
+    # na origem — entao seguem como sempre: a linha da CTS entra por soma. Onde houver
+    # sobreposicao real elas ficam com a dupla contagem que as de cima deixaram de ter, e
+    # isso e uma incoerencia CONHECIDA entre grandezas, nao um esquecimento. Vazao dobrada
+    # superdimensiona a ETE; e o preco de nao perder a demanda do coletor.
+    _CTS_SUM=["universo_populacao","populacao_atual","populacao_novas_obras",
+              "vazao_contribuicao","receita_faturada_media_mensal","receita_arrecadada_media_mensal"]
     if usar_cts:                                   # LIGADO: CTS entra como no proprio (dados operacionais)
         for _c,_row in _cts_op.items(): subop[_c]=_row
-    else:                                          # DESLIGADO: soma a demanda da CTS na sub-bacia pareada
+    else:                                          # DESLIGADO: a sub-bacia absorve a CTS pareada
+        _sem_consolidado=[]
         for _sb,_c in _cts_dep.items():
             if _sb not in subop or _c not in _cts_op: continue
             _s=subop[_sb]; _k=_cts_op[_c]
             _us=num(_s.get("universo_ligacoes")); _uc=num(_k.get("universo_ligacoes"))
             _ps=num(_s.get("potencial_crescimento"),1.0); _pk=num(_k.get("potencial_crescimento"),1.0)
-            if _us+_uc>1e-9: _s["potencial_crescimento"]=(_us*_ps+_uc*_pk)/(_us+_uc)   # media ponderada pelo universo
+            # POTENCIAL: media ponderada pelo que a sub-bacia PASSA A ATENDER.
+            #
+            # Com a coluna consolidada o peso da parte que vem do coletor e a
+            # SOBREPOSICAO (consolidado - exclusiva), e nao o universo inteiro da CTS: a
+            # area que so ela alcancava nao e atendida por ninguem, e nao deve pesar num
+            # potencial que multiplica um universo do qual ela nao faz parte.
+            #
+            # Sem a coluna, o peso continua sendo o universo da CTS, que e o que a soma
+            # de fato incorpora — e e o que preserva o total entre ligado e desligado.
+            _cons=num(_s.get(_CTS_CONSOLIDADO[0][1])) if _s.get(_CTS_CONSOLIDADO[0][1]) not in (None,"") else None
+            _peso=(max(0.0,_cons-_us) if _cons is not None else _uc)
+            if _us+_peso>1e-9: _s["potencial_crescimento"]=(_us*_ps+_peso*_pk)/(_us+_peso)
             for _f in _CTS_SUM: _s[_f]=num(_s.get(_f))+num(_k.get(_f))
+            # SEM A COLUNA CONSOLIDADA, volta a somar. E a degradacao honesta: perder a
+            # demanda da CTS seria pior que conta-la duas vezes, e o aviso diz qual dos
+            # dois comportamentos a rodada teve.
+            if _s.get(_CTS_CONSOLIDADO[0][1]) in (None,""):
+                _sem_consolidado.append(_sb)
+                for _exc,_ in _CTS_CONSOLIDADO: _s[_exc]=num(_s.get(_exc))+num(_k.get(_exc))
+                continue
+            for _exc,_tot in _CTS_CONSOLIDADO:
+                if _s.get(_tot) not in (None,""): _s[_exc]=num(_s.get(_tot))
+        if _sem_consolidado:
+            print(f"  [aviso] {len(_sem_consolidado)} sub-bacia(s) com CTS pareada mas sem "
+                  f"`universo_ligacoes_com_cts`: a demanda foi SOMADA, o que conta a area "
+                  f"sobreposta duas vezes. Ex.: {_sem_consolidado[:3]}")
     # ---- UNIDADES ----------------------------------------------------------------
     # LIGACOES e ECONOMIAS vem SEMPRE da base comercial (Databricks) para toda sub-bacia.
     # POPULACAO e opcional e entra por input do usuario, quando precisa.
@@ -1509,6 +1555,9 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     for _n in cen.nos.values(): _n.is_cts=(_n.id in cen.cts_ids)
     _cts_na_uni={_c for _s,_c in _cts_dep.items() if _s in cen.nos}   # pares cuja sub-bacia esta no escopo
     if _cts_na_uni:
+        # A descricao do modo desligado mudou junto com o comportamento: ela dizia
+        # "demanda somada", e somar era exatamente o que passou a NAO acontecer quando ha
+        # coluna consolidada. Log que descreve o codigo antigo e pior que log nenhum.
         print(f"  [info] CTS: {len(_cts_na_uni)} nesta unidade ({len(_cts_ids_all)} no banco) -> usar_cts={usar_cts} "
-              f"({'entram como nos proprios' if usar_cts else 'demanda somada na sub-bacia pareada'})")
+              f"({'entram como nos proprios' if usar_cts else 'a sub-bacia absorve a pareada (colunas *_com_cts)'})")
     return cen
