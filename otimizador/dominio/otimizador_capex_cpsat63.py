@@ -147,7 +147,7 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
     # ---- meta de cobertura (opcional) ----
     if meta_hard:
         for cidnome,cd in cen.cidades.items():
-            terms=[int(round(c.lig))*u[c.id][k] for c in coletas if cen.cidade_da(c)==cidnome for k in range(Kmax+1)]
+            terms=[int(round(c.lig_cob))*u[c.id][k] for c in coletas if cen.cidade_da(c)==cidnome for k in range(Kmax+1)]
             if terms and cd.meta_aumento>0: md.Add(sum(terms)>=int(round(cd.meta_aumento)))
 
     # ---- orcamento por regional/ano ----

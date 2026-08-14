@@ -62,7 +62,10 @@ MAPA_PARAMS = {
     "DATA_INICIO":          "data_inicio",           "REGIONAL":        "regional",
     "UNIDADE":              "unidade",               "CURVA_ADOCAO":    "curva_adocao",
     "BASE_RECEITA":         "base_receita",          "USAR_CTS":        "usar_cts",
-    "ANOS_EXTRA_CONCLUSAO": "anos_extra_conclusao",  "INCLUIR_INDUSTRIAL": "incluir_industrial",
+    "ANOS_EXTRA_CONCLUSAO": "anos_extra_conclusao",
+    # O recorte da meta. Antes era `INCLUIR_INDUSTRIAL`, que subtraia industria de
+    # receita e vazao junto; hoje ele so escolhe em que moeda a COBERTURA e medida.
+    "COBERTURA_SO_RESIDENCIAL": "cobertura_so_residencial",
 }
 # chaves que sao do JOB, nao do motor (nao viram kwarg do ler_banco)
 CHAVES_DO_JOB = {"USUARIO", "MAX_TIME_S", "WORKERS"}
