@@ -3,7 +3,7 @@
 Público: quem vai mudar o código e precisa saber **o que já está protegido** e **o que não
 está**. Também serve como especificação executável: cada teste é uma regra de negócio escrita.
 
-Panorama: **107 testes em 7 arquivos**, mais o **portão de qualidade por rodada** (14 checagens
+Panorama: **127 testes em 8 arquivos**, mais o **portão de qualidade por rodada** (14 checagens
 críticas), que é um mecanismo diferente e complementar — ver §5.8.
 
 ---

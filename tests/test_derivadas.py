@@ -18,7 +18,7 @@ def test_ligacoes_novas_e_universo_menos_atuais():
     # coleta.lig (ligacoes novas das obras) deve ser universo_ligacoes - ligacoes_atuais
     M = engine()
     so = _subop(BANK_CLASSE)
-    cen = silent(M.ler_banco, BANK_CLASSE, incluir_industrial=True)
+    cen = silent(M.ler_banco, BANK_CLASSE, cobertura_so_residencial=False)
     checados = 0
     for col in cen.coletas:
         d = so.get(col.no)
@@ -40,6 +40,6 @@ def test_valor_do_banco_e_ignorado(tmp_path):
     for r in range(2, ws.max_row + 1):
         ws.cell(r, idx["ligacoes_novas_obras"]).value = 0
     wb.save(dst)
-    cen = silent(M.ler_banco, str(dst), incluir_industrial=True)
+    cen = silent(M.ler_banco, str(dst), cobertura_so_residencial=False)
     # se a engine tivesse usado o 0 do banco, nenhuma coleta teria ligacoes novas
     assert any(col.lig > 0 for col in cen.coletas), "a engine usou o valor (errado) do banco em vez de derivar"

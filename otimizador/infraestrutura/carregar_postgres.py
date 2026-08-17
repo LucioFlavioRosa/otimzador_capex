@@ -125,7 +125,7 @@ def carregar_postgres(pg_url, schema="input", snapshot_para=None, **params):
     """Le o input do Postgres e devolve o Cenario (via ler_banco sobre um xlsx temporario).
 
     `params` sao os parametros da rodada (os mesmos da celula PARAMETROS do notebook):
-    orcamento, unidade, base_receita, usar_cts, incluir_industrial, foco_cobertura,
+    orcamento, unidade, base_receita, usar_cts, cobertura_so_residencial, foco_cobertura,
     penalidade_cobertura, anos_extra_conclusao, ete_faseada, etc.
 
     `snapshot_para`: caminho onde MANTER o xlsx materializado, em vez de apaga-lo. Ele e a
