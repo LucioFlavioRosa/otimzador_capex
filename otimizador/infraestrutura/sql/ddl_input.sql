@@ -48,11 +48,16 @@ CREATE TABLE IF NOT EXISTS input.superintendencia_cidade (
 );
 
 -- aba do motor: cidade-sistema
+--
+-- `usa_sistema_cts` e da REGIONAL, e nao do Databricks: marcado, o sistema aceita
+-- UMA CTS; desmarcado, aceita varias. Regra de cadastro — o motor ignora, porque
+-- para ele uma ou duas CTS sao nos como quaisquer outros.
 CREATE TABLE IF NOT EXISTS input.cidade_sistema (
-    sistema_id   text PRIMARY KEY,
-    sistema_name text,
-    cidade_id    text NOT NULL
-        REFERENCES input.superintendencia_cidade(cidade_id)
+    sistema_id      text PRIMARY KEY,
+    sistema_name    text,
+    cidade_id       text NOT NULL
+        REFERENCES input.superintendencia_cidade(cidade_id),
+    usa_sistema_cts boolean NOT NULL DEFAULT false
 );
 
 -- aba do motor: sistema-topologia
@@ -60,10 +65,15 @@ CREATE TABLE IF NOT EXISTS input.cidade_sistema (
 -- por id GLOBAL — `self.nos = {n.id: n for n in nos}` (otimizador_capex_v62.py:63). Um id
 -- repetido em outro sistema seria aceito pelo banco e o motor manteria so o ultimo,
 -- perdendo um no inteiro em silencio.
+--
+-- `sistema_id` ACEITA NULO: componente cadastrado e ainda nao colocado em sistema
+-- nenhum. Do Databricks vem quais sub-bacias e qual ETE sao do sistema, e todas as
+-- CTS — em que sistema cada CTS entra, e o caminho ate a ETE, quem monta e a
+-- Regional. O motor pula essas linhas sozinho (`sistema_id not in sis_cid`).
 CREATE TABLE IF NOT EXISTS input.sistema_topologia (
     componente_sistema_id         text PRIMARY KEY,
     componente_sistema_nome       text,
-    sistema_id                    text NOT NULL
+    sistema_id                    text
         REFERENCES input.cidade_sistema(sistema_id),
     componente_sistema_id_jusante text
 );
