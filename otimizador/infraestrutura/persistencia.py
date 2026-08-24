@@ -693,6 +693,34 @@ def _spark():
         return None
 
 
+def _dbutils(sp):
+    """DBUtils programatico (fora de notebook, onde `dbutils` nao existe como global).
+
+    None fora do Databricks Runtime (Spark vanilla, sem o modulo `pyspark.dbutils`) —
+    quem chama cai de volta no `_jvm`/`_jsc` cru nesse caso."""
+    try:
+        from pyspark.dbutils import DBUtils
+        return DBUtils(sp)
+    except Exception:
+        return None
+
+
+def _dbfs_existe(dbu, path):
+    """`path` existe no storage por tras de `dbutils.fs`? Mesma regra de
+    `_tabela_existe`: so 'nao existe' vira False; erro de permissao/rede PROPAGA —
+    confundir os dois faria um erro transitorio parecer 'primeira gravacao' e pular
+    o delete da particao antiga (duplicando) ou, no Delta, escolher `append` sobre
+    uma tabela que existe (a mesma duplicacao que este modulo existe para evitar)."""
+    try:
+        dbu.fs.ls(path)
+        return True
+    except Exception as e:
+        msg = str(e)
+        if "FileNotFoundException" in msg or "does not exist" in msg.lower():
+            return False
+        raise
+
+
 _RUN_ID_VALIDO = _re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
@@ -755,8 +783,22 @@ def _apagar_particao_spark(sp, base, rid):
     NOVOS dentro da particao — e reexecutar a mesma rodada duplicaria o parquet em
     vez de substitui-lo. Apagar diretorio so vale para formato de arquivo; num Delta
     isso corromperia o log da tabela, e por isso o Delta tem caminho proprio.
+
+    Via `dbutils.fs`, nao `_jvm`/`_jsc.hadoopConfiguration()` cru: o credential do
+    cluster para storage remoto (ex.: Spark config `fs.azure.account.key...`) e
+    injetado na camada gerenciada do Databricks — a mesma que `dbutils.fs` usa —, nao
+    necessariamente no `hadoopConfiguration()` exposto por `_jsc`; acessar o FS pelo
+    JVM direto pode falhar mesmo com o credential do cluster correto. `dbutils.fs` e
+    tambem o unico caminho permitido em compute serverless (`_jvm` e bloqueado la).
+    Sem Databricks (Spark vanilla), cai no `_jvm`/`_jsc` de antes.
     """
-    p = sp._jvm.org.apache.hadoop.fs.Path(f"{base}/run_id={rid}")
+    path = f"{base}/run_id={rid}"
+    dbu = _dbutils(sp)
+    if dbu is not None:
+        if _dbfs_existe(dbu, path):
+            dbu.fs.rm(path, True)
+        return
+    p = sp._jvm.org.apache.hadoop.fs.Path(path)
     fs = p.getFileSystem(sp._jsc.hadoopConfiguration())
     if fs.exists(p):
         fs.delete(p, True)
@@ -779,12 +821,84 @@ def _tabela_existe(sp, alvo):
 
 def _delta_existe(sp, base):
     """Ha um Delta gravado em `base`? Mesma regra de `_tabela_existe`: so ausencia de
-    API vira False; falha ao consultar o storage propaga."""
+    API vira False; falha ao consultar o storage propaga.
+
+    Via `dbutils.fs` quando disponivel — mesmo motivo de `_apagar_particao_spark`."""
+    log_path = f"{str(base).rstrip('/')}/_delta_log"
+    dbu = _dbutils(sp)
+    if dbu is not None:
+        return _dbfs_existe(dbu, log_path)
     try:
-        p = sp._jvm.org.apache.hadoop.fs.Path(f"{str(base).rstrip('/')}/_delta_log")
+        p = sp._jvm.org.apache.hadoop.fs.Path(log_path)
     except AttributeError:
         return False
     return p.getFileSystem(sp._jsc.hadoopConfiguration()).exists(p)
+
+
+def _schema_spark(df):
+    """StructType explicito para `sp.createDataFrame(df, schema=...)`.
+
+    Sem isto, o Spark INFERE o tipo de cada coluna a partir dos valores — e uma
+    coluna que sai TODA NULA numa rodada pequena (sem obrigatoria, sem ETE faseada,
+    sem potencial residual, como `foco_cobertura` quando o run_request nao informa
+    FOCO_COBERTURA) vira NullType (VOID), que o Parquet se recusa a gravar:
+    `UNSUPPORTED_DATA_TYPE_FOR_DATASOURCE`.
+
+    Usa o MESMO mapa `publicacao.TIPOS_FIXOS` que gera o DDL do Postgres, para as
+    duas camadas (blob e Postgres) nunca divergirem sobre o tipo real de uma coluna
+    — e o mesmo fallback por `dtype.kind` de `publicacao._tipo_pg` para as demais.
+
+    None sem pyspark real instalado (testes offline, com SparkSession de mentira):
+    `createDataFrame(df, schema=None)` equivale a nao passar `schema`, ou seja, cai
+    de volta na inferencia normal — o mesmo comportamento de antes desta funcao.
+    """
+    try:
+        from pyspark.sql.types import (StructType, StructField, DoubleType, LongType,
+                                       BooleanType, StringType, TimestampType)
+    except Exception:
+        return None
+    from otimizador.infraestrutura.publicacao import TIPOS_FIXOS, COLUNAS_JSONB
+    tipo_spark = {"DOUBLE PRECISION": DoubleType(), "BIGINT": LongType(),
+                 "BOOLEAN": BooleanType(), "TEXT": StringType(),
+                 "TIMESTAMPTZ": TimestampType(), "JSONB": StringType()}
+    campos = []
+    for c in df.columns:
+        if c in COLUNAS_JSONB:                      # ja chega como texto JSON (ver `_j`)
+            campos.append(StructField(c, StringType(), True))
+            continue
+        if c in TIPOS_FIXOS:
+            campos.append(StructField(c, tipo_spark[TIPOS_FIXOS[c]], True))
+            continue
+        k = df[c].dtype.kind
+        if k == "b":
+            t = BooleanType()
+        elif k == "i":
+            t = LongType()
+        elif k == "f":
+            t = DoubleType()
+        elif k == "M":
+            t = TimestampType()
+        else:
+            t = StringType()
+        campos.append(StructField(c, t, True))
+    return StructType(campos)
+
+
+def _normalizar_timestamps(df):
+    """Colunas mapeadas para TIMESTAMPTZ (hoje so `data_hora`) chegam como string ISO
+    (`_dt.datetime.now().isoformat()` em `materializar`) — formato que o Postgres aceita
+    direto, mas que o Spark REJEITA com `FIELD_DATA_TYPE_UNACCEPTABLE_WITH_NAME` quando
+    o schema declara `TimestampType`: schema explicito e estrito, nao faz o cast frouxo
+    que a inferencia automatica faria. Converte so essas colunas; o resto do df, intocado.
+    """
+    from otimizador.infraestrutura.publicacao import TIPOS_FIXOS
+    cols = [c for c in df.columns if TIPOS_FIXOS.get(c) == "TIMESTAMPTZ"]
+    if not cols:
+        return df
+    df = df.copy()
+    for c in cols:
+        df[c] = pd.to_datetime(df[c])
+    return df
 
 
 def salvar(tabs, destino, formato="parquet", particionar_por_run=True, verbose=True):
@@ -815,7 +929,9 @@ def salvar(tabs, destino, formato="parquet", particionar_por_run=True, verbose=T
             continue
         base = str(destino).rstrip("/") + "/" + nome
         if sp is not None and (remoto or formato == "delta"):
-            sdf = sp.createDataFrame(df)
+            schema = _schema_spark(df)
+            sdf = sp.createDataFrame(_normalizar_timestamps(df) if schema is not None else df,
+                                     schema=schema)
             fmt = "delta" if formato == "delta" else formato
             particiona = particionar_por_run and "run_id" in df.columns
             w = sdf.write.format(fmt)

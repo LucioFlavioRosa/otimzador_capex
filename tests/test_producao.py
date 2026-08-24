@@ -653,7 +653,7 @@ def _spark_duble(existentes=(), tabelas=()):
         def getFileSystem(self, conf):
             return _FS()
 
-    def cria_df(df):
+    def cria_df(df, schema=None):
         reg = {"options": {}}
         estado["escritas"].append(reg)
         return types.SimpleNamespace(write=_EscritorDuble(reg))
@@ -867,3 +867,58 @@ def test_spark_antigo_sem_a_api_cai_para_criacao(monkeypatch):
 
     (esc,) = estado["escritas"]
     assert esc["mode"] == "append" and "replaceWhere" not in esc["options"]
+
+
+def test_schema_spark_evita_voidtype_em_coluna_toda_nula(monkeypatch):
+    """`foco_cobertura` (e qualquer coluna de `publicacao.TIPOS_FIXOS`) toda nula numa
+    rodada pequena nao pode virar NullType: o Parquet recusa gravar
+    (UNSUPPORTED_DATA_TYPE_FOR_DATASOURCE). `_schema_spark` tem de fixar o tipo real
+    mesmo sem nenhum valor de amostra para inferir dele — usa um `pyspark.sql.types`
+    de mentira porque o pyspark de verdade nao esta no ambiente de teste offline."""
+    import sys
+    import types as _types
+    from otimizador.infraestrutura import persistencia as P
+
+    class _Tipo:
+        def __init__(self, nome):
+            self.nome = nome
+
+    fake_types = _types.ModuleType("pyspark.sql.types")
+    fake_types.StructType = lambda campos: campos
+    fake_types.StructField = lambda nome, tipo, nullable=True: (nome, tipo)
+    fake_types.DoubleType = lambda: _Tipo("double")
+    fake_types.LongType = lambda: _Tipo("long")
+    fake_types.BooleanType = lambda: _Tipo("boolean")
+    fake_types.StringType = lambda: _Tipo("string")
+    fake_types.TimestampType = lambda: _Tipo("timestamp")
+    monkeypatch.setitem(sys.modules, "pyspark", _types.ModuleType("pyspark"))
+    monkeypatch.setitem(sys.modules, "pyspark.sql", _types.ModuleType("pyspark.sql"))
+    monkeypatch.setitem(sys.modules, "pyspark.sql.types", fake_types)
+
+    df = pd.DataFrame({
+        "run_id": ["r1"],
+        "foco_cobertura": [None],   # o bug relatado: FOCO_COBERTURA ausente -> coluna toda nula
+        "vpl": [123.45],
+        "rotulo": ["teste"],
+    })
+    campos = dict(P._schema_spark(df))
+    assert campos["foco_cobertura"].nome == "double"
+
+
+def test_normalizar_timestamps_converte_iso_string_em_datetime():
+    """`data_hora` sai de `materializar` como string ISO (`_dt...isoformat()`) —
+    formato que o Postgres aceita direto, mas que o Spark com schema explicito
+    (TimestampType) REJEITA: FIELD_DATA_TYPE_UNACCEPTABLE_WITH_NAME."""
+    from otimizador.infraestrutura import persistencia as P
+
+    df = pd.DataFrame({"run_id": ["r1"], "data_hora": ["2026-08-24T13:11:02"]})
+    convertido = P._normalizar_timestamps(df)
+    assert pd.api.types.is_datetime64_any_dtype(convertido["data_hora"])
+    assert isinstance(df["data_hora"].iloc[0], str)   # original intacta, sem mutacao
+
+
+def test_normalizar_timestamps_sem_coluna_timestamptz_nao_copia_o_df():
+    from otimizador.infraestrutura import persistencia as P
+
+    df = pd.DataFrame({"run_id": ["r1"], "vpl": [1.0]})
+    assert P._normalizar_timestamps(df) is df
