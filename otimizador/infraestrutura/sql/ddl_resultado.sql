@@ -205,6 +205,7 @@ CREATE TABLE IF NOT EXISTS public.otim_sistema (
     ete_responsavel TEXT,
     folga_inicial DOUBLE PRECISION,
     capacidade_modulo DOUBLE PRECISION,
+    unidade_capacidade TEXT,
     capex_modulo DOUBLE PRECISION,
     capex_terreno DOUBLE PRECISION,
     modulos_disponiveis BIGINT,

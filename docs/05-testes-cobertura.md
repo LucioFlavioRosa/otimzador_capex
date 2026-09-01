@@ -27,36 +27,53 @@ O que quebraria em silêncio se ninguém travasse:
 - *(solver, slow)* **Separabilidade por cidade é exata** — a decomposição fecha em ~zero. Este
   é o teste que **pula** por falta da suíte legada.
 
-## 5.2 `test_cts.py` — CTS ligado × desligado (9 testes)
+## 5.2 `test_cts.py` — CTS ligada × desligada (13 testes)
 
-O CTS pode ser visto como nó próprio (`USAR_CTS=True`) ou agregado (`False`). É a **mesma
-demanda física em duas representações**, e o conjunto de testes fixa o que tem de bater e o que
-tem de diferir:
+A CTS pode entrar como nó próprio (`USAR_CTS=True`) ou não entrar (`False`). Para a sub-bacia,
+a **única** diferença entre os dois é qual coluna é lida:
 
-| Tem de ser **idêntico** | Tem de **diferir** |
+| rodada | quem atende a área sobreposta | o que a sub-bacia lê |
+|---|---|---|
+| `True` | a CTS, com as obras dela | as colunas exclusivas |
+| `False` | a sub-bacia | as oito `*_com_cts` (exclusivo + sobreposta) |
+
+Nada é somado da linha da CTS. **Vazão, receita e população são dado da sub-bacia**: se desligar
+o coletor muda a vazão dela, quem atualiza a base é quem cadastra.
+
+O que os testes fixam:
+
+| Comportamento | Teste |
 |---|---|
-| cobertura | 4 obras a mais por CTS no modo ligado |
-| vazão | CAPEX maior — **exatamente** o CAPEX das obras da CTS |
-| universo efetivo | VPL menor no modo ligado |
+| desligado atende **menos** — a área que só o coletor alcançava fica sem atendimento | `test_desligado_atende_menos_que_ligado` |
+| o universo efetivo do desligado é o da sub-bacia, com o potencial dela | `test_universo_efetivo_do_desligado_e_o_da_sub_bacia` |
+| vazão **não** é mais somada; a diferença é exatamente a das CTS | `test_vazao_NAO_e_mais_somada` |
+| sem a coluna consolidada, usa a exclusiva e **alerta** | `test_sem_a_coluna_usa_a_exclusiva_e_ALERTA` |
+| com a CTS ligada, a coluna consolidada é ignorada | `test_com_cts_ligada_a_coluna_consolidada_e_ignorada` |
+| ligado tem 4 obras a mais por CTS, e CAPEX maior no valor exato das obras dela | `test_ligado_tem_quatro_obras_a_mais_por_cts` |
 
-Mais: cada CTS tem os 4 componentes certos (coletor de tempo seco + tronco + EEE + linha de
-recalque), sendo o coletor a âncora de coleta; e **retrocompatibilidade** — banco sem CTS dá
-resultado idêntico com a flag em `True` ou `False`.
+O **VPL** não tem sentido fixado: sem o coletor, as ligações que ele atenderia passam a ser
+cobradas pelo ticket da sub-bacia, e qual dos dois é maior depende do cadastro.
+
+Cada CTS tem os 4 componentes certos (coletor de tempo seco + tronco + EEE + linha de recalque),
+sendo o coletor a âncora de coleta. Banco **sem** CTS dá resultado idêntico nos dois modos.
 
 Se você mexer em rateio, topologia ou cobertura, é aqui que costuma quebrar primeiro.
 
-## 5.3 `test_classe.py` — residencial × industrial (7 testes)
+## 5.3 `test_classe.py` — recorte da meta (10 testes)
 
-A regra de leitura mais fácil de errar do sistema (dupla contagem). Travado:
+`COBERTURA_SO_RESIDENCIAL` decide em que moeda a **meta** é medida. Travado:
 
-- **Banco sem colunas `*_industrial` → os dois modos são idênticos** (retrocompatível).
-- **Só residencial: CAPEX igual**, receita e vazão caem — e a queda de vazão é **exatamente** a
-  parcela industrial. Não é aproximação.
-- **Cobertura por ligações cai; por economias cai; por população fica intacta** (indústria ≈ 0
-  habitantes). A parcela industrial de economias é estimada pela proporção das ligações
-  industriais.
+- **O recorte acaba na cobertura.** CAPEX, vazão, receita e VPL são **idênticos** nos dois modos
+  — a mesma carteira de obras rende o mesmo, porque a indústria continua faturando e continua
+  mandando esgoto para a ETE.
+- **Universo e base atendida encolhem juntos** quando o recorte está ligado: as duas pontas da
+  fração saem das colunas `*_residencial`, medidas na base comercial.
+- **Por população fica intacto** — indústria não mora, então o universo de população já é
+  residencial, e cidade que mede assim ignora o recorte.
+- **A obra carrega duas quantidades**: `lig` (habilitadas, alimenta a receita) e `lig_cob` (contam
+  para a meta). Sem recorte as duas são iguais.
+- **Banco sem as colunas `*_residencial` → os dois modos são idênticos**, com aviso alto.
 
-Ou seja: os três valores possíveis de `unidade_cobertura` têm comportamento fixado.
 
 ## 5.4 `test_derivadas.py` — colunas calculadas (2 testes)
 
@@ -127,22 +144,21 @@ fim, e os dois ramos de saída — `FALHOU_QUALIDADE` **não publica**, e erro t
   `X`. Sem isso, cada rodada gerava um id novo: `controle.*` e `public.otim_*` deixavam de
   casar e cada retry publicava de novo em vez de substituir.
 - **Snapshot do cadastro** — a materialização gera as `snapshot__*` a partir do arquivo fonte.
-- **`blob_uri` aponta para um caminho que existe** — o ponteiro da auditoria. Até 2026-08-04
-  gravava `<destino>/run_id=<rid>`, que a gravação nunca cria: `salvar` particiona por `run_id`
-  **dentro** de cada tabela (`<destino>/<tabela>/run_id=<rid>/`). Não havia perda de dado, mas
-  quem seguisse `otim_meta.blob_uri` para achar o snapshot congelado não achava nada.
+- **`blob_uri` aponta para um caminho que existe** — o ponteiro da auditoria. Ele guarda a
+  raiz do destino, porque `salvar` particiona por `run_id` **dentro** de cada tabela
+  (`<destino>/<tabela>/run_id=<rid>/`). Um ponteiro que não leva ao snapshot é auditoria que
+  não audita.
 - **Tabela obrigatória vazia é erro; tabela tolerada vazia só avisa.**
 - **Falha ao notificar não derruba a publicação** — a notificação é pós-commit; o dado já está
   gravado quando ela roda.
 
 ### Idempotência da cópia em blob (24 testes)
 
-O `DELETE ... WHERE run_id` tornava a rodada idempotente no Postgres, e a documentação
-generalizava isso para "tudo é idempotente". O blob não era: a gravação via Spark era
-`mode("append")` particionada por `run_id`, ou seja, o retry acrescentava arquivos **dentro**
-da partição em vez de trocá-la. Como o blob é escrito **antes** da transação do Postgres,
-bastava a rodada falhar depois dele para o parquet ficar em dobro — e quem seguisse o
-`blob_uri` meses depois encontraria o dobro das linhas. Corrigido em 2026-08-06.
+Rodar o mesmo `run_id` de novo **substitui** a rodada nos dois lados: `DELETE ... WHERE run_id`
+no Postgres, e apagar a partição `run_id=<rid>` antes de gravar no blob. A ordem é o que torna
+isso necessário — o blob é escrito **antes** da transação do Postgres, então uma rodada que
+falhe entre os dois deixaria parquet para o retry encontrar. Estes testes fixam que o retry
+troca a partição em vez de acrescentar dentro dela.
 
 - **Regravar a mesma rodada substitui a partição** — 3 linhas gravadas duas vezes continuam 3.
 - **Não sobra formato antigo na partição** — `carregar()` lê **tudo** que estiver na pasta,

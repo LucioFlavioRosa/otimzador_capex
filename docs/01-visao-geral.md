@@ -1,6 +1,6 @@
 # 1. Visão geral da solução
 
-Público: qualquer pessoa que vá mexer neste pacote. Leia antes dos outros quatro documentos.
+Público: qualquer pessoa que vá mexer neste pacote. Leia antes dos outros seis documentos.
 
 ---
 
@@ -53,8 +53,8 @@ Consequências práticas — é por isso que vale a pena manter:
    desenvolvimento e das fixtures. O motor não sabe se os dados vieram de Excel ou do
    Postgres — e é isso que garante que o job em produção calcule **exatamente** o mesmo que
    o notebook do analista.
-3. **Trocar a origem dos dados não toca no cálculo.** A Fase 2b (ler direto de DataFrames,
-   sem o `.xlsx` temporário) muda um adaptador, não o motor.
+3. **Trocar a origem dos dados não toca no cálculo.** Ler direto de DataFrames, sem o `.xlsx`
+   temporário, mudaria um adaptador — não o motor.
 
 **Regra para o time:** um `import psycopg2`, um `open()` ou um `requests` dentro de
 `otimizador/dominio/` é um bug de arquitetura, mesmo que funcione. Vale para o pacote inteiro
@@ -188,10 +188,14 @@ rateado entre elas na proporção da vazão. As frações de cada obra **somam e
 portão de qualidade checa isso (desvio < 1e-6).
 
 **CTS (Coletor de Tempo Seco)** — estrutura irmã da sub-bacia, pareada 1:1. Com
-`USAR_CTS=True` ela vira um nó próprio com 4 obras (coletor, tronco, EEE, linha de recalque);
-com `False`, a mesma demanda é vista de forma agregada. **A cobertura, a vazão e o universo
-efetivo têm de ser idênticos nos dois modos** — só CAPEX e VPL mudam. Há 9 testes só sobre
-essa invariância.
+`USAR_CTS=True` ela vira um nó próprio com 4 obras (coletor, tronco, EEE, linha de recalque)
+e atende a área que se sobrepõe à sub-bacia. Com `False` ela não entra: as obras dela ficam de
+fora e a sub-bacia lê as colunas `*_com_cts` (o que é exclusivo dela **mais** a área sobreposta).
+
+**Os dois modos não são a mesma demanda.** Sem o coletor, a parte da área que só ele alcançava
+não é atendida por ninguém — o universo da meta é menor, e é assim que tem de ser. Vazão,
+receita e população são dado da sub-bacia e não são herdadas da linha da CTS: se desligar o
+coletor muda a vazão dela, quem atualiza a base é quem cadastra. 13 testes fixam isso.
 
 **ETE faseada** (`ETE_FASEADA`) — quando ligada, cada ETE vira K obras-módulo, priorizáveis
 individualmente, e a capacidade cresce com o fluxo. Muda a **cardinalidade do problema**, não
@@ -233,27 +237,26 @@ cidade no ano**. É endógena — depende do próprio plano.
 
 ---
 
-## 1.10 Estado do pacote e pendências conhecidas
+## 1.10 O que o pacote entrega hoje, e o que não entrega
 
-| Fase | Estado |
+| Capacidade | Estado |
 |---|---|
-| 1 — Modelo de dados (`otimizador/infraestrutura/sql/ddl_input.sql`) | pronto, com PKs/FKs/tipos revisados |
-| 2 — Adaptador Postgres → Cenário | pronto; usa `.xlsx` temporário |
-| 2b — `ler_banco` aceitando dict de DataFrames | **não feito** — proposital, ver abaixo |
-| 3 — Portão de qualidade | pronto, 14 checagens críticas |
-| 4 — Orquestração do job | pronto |
-| 4b — Reorganização em camadas (DDD) + entrada única `main.py` | pronto (merge `1126b85`, 2026-08-03) |
-| 5 — Wheel + CI | **a fazer** — o pacote já está no formato que o wheel espera |
+| Modelo de dados do cadastro (`otimizador/infraestrutura/sql/ddl_input.sql`) | com PKs, FKs e tipos |
+| Adaptador Postgres → `Cenario` | materializa um `.xlsx` temporário e chama `ler_banco` |
+| Portão de qualidade por rodada | 14 checagens críticas |
+| Job de produção (`otimizador/aplicacao/job_databricks.py`) | lê a rodada, resolve, publica e marca o desfecho |
+| Organização em camadas (`dominio`, `aplicacao`, `infraestrutura`, `apresentacao`) | entrada única por `main.py` |
+| Empacotamento em wheel e CI | **não faz parte do pacote** |
 
-**Por que a Fase 2b não foi feita:** o `.xlsx` temporário tem custo real (exige `openpyxl` no
-cluster, escreve no disco local do driver, perde tipagem no caminho Postgres→pandas→Excel), mas
-mexer nela significa mexer na assinatura de `ler_banco` — exatamente o ponto que a
-retrocompatibilidade Excel e os testes protegem. Quando for feita, o caminho de menor risco é
+**`ler_banco` recebe caminho de arquivo, não DataFrames.** O `.xlsx` temporário tem custo real
+— exige `openpyxl` no cluster, escreve no disco local do driver e perde tipagem no caminho
+Postgres→pandas→Excel. Trocar isso significa mexer na assinatura de `ler_banco`, que é o ponto
+protegido pela retrocompatibilidade do caminho Excel e pelos testes. O caminho de menor risco é
 aditivo: `ler_banco(fonte)` aceitando `dict` **ou** caminho, sem tocar no corpo da função.
 
-**Dívidas menores registradas** (todas em `REVISAO_PRODUCAO.md`): `input` sem discriminador de
-unidade — cada rodada lê o cadastro inteiro; DDL de resultado ainda aplicado como migration
-manual; identificadores SQL por f-string em vez de `psycopg2.sql.Identifier`.
+**Limitações conhecidas:** `input` não tem discriminador de unidade — cada rodada lê o cadastro
+inteiro e filtra depois; o DDL de resultado é aplicado como migração manual; identificadores SQL
+são interpolados por f-string em vez de `psycopg2.sql.Identifier`.
 
 ---
 

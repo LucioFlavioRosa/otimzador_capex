@@ -20,7 +20,7 @@ python -m pytest -q tests/
 Python 3.10+. Instalação limpa leva ~2 min (o `ortools` é o pesado); a suíte roda em ~2 s.
 
 Se você não vai rodar o pipeline, o mínimo para a suíte é:
-`pytest`, `pandas`, `openpyxl`, `ortools` (só os testes de solver), `matplotlib` (só um teste).
+`pytest`, `pandas`, `openpyxl`, `ortools` (os testes de solver) e `matplotlib` (10 testes de materialização, em `test_producao.py`).
 
 ---
 
@@ -37,7 +37,7 @@ $ python -m pytest tests/
 | `test_nucleo.py` | 9 |
 | `test_desempate_por_retorno.py` | 13 |
 | `test_cts.py` | 13 |
-| `test_classe.py` | 7 |
+| `test_classe.py` | 10 |
 | `test_derivadas.py` | 2 |
 | `test_regressao_golden.py` | 4 |
 | `test_producao.py` | 64 |
@@ -71,7 +71,7 @@ python -m pytest -m "not solver" tests/       # sem OR-Tools (rápido)
 python -m pytest -m solver tests/             # só os do solver
 python -m pytest -m "not slow" tests/         # pula a separabilidade por cidade
 python -m pytest tests/test_producao.py -v    # só a camada de produção
-python -m pytest tests/ -k industrial         # por nome
+python -m pytest tests/ -k residencial        # por nome
 python -m pytest tests/ -x --ff               # para no 1º erro, começando pelos que falharam
 python -m pytest tests/ -rs                   # mostra o motivo de cada skip
 ```
@@ -136,10 +136,9 @@ assim, prefira um banco descartável.
 `otimizador/infraestrutura/sql/ddl_input.sql`**, trocando só o nome do schema. Se você mudar o DDL — coluna nova, `CHECK`
 novo — o teste passa a exercitar a versão nova sem ninguém precisar editá-lo.
 
-> ⚠️ **Estes 12 testes nunca foram executados.** Foram escritos contra a implementação, mas na
-> máquina onde o pacote foi revisado não havia Postgres. Espere ajustes na primeira execução —
-> é a natureza de um teste de integração que ainda não viu o banco. O que foi verificado
-> offline: o módulo coleta e o `_ddl_controle` extrai o SQL corretamente.
+> **Estes 12 testes exigem um Postgres real.** Sem `OTIMIZADOR_PG_TESTE` apontando para um
+> banco, eles pulam — é o único jeito de exercitar a publicação transacional, a idempotência por
+> `run_id` e o DDL de controle, que nenhum teste sem banco alcança.
 
 ---
 

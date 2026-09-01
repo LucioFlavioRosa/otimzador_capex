@@ -13,8 +13,25 @@ from _helpers import load_cts, build_all, capex_total, cobertura_fim, silent, so
 GOLDEN = {
     True:  dict(vpl=107303304.663241, capex=6476000.0, cobertura=4800.0,
                 universo=5100.0, vazao=430.0, obras=28, n_cts=2),
-    False: dict(vpl=107717807.340670, capex=5640000.0, cobertura=4800.0,
-                universo=5100.0, vazao=430.0, obras=20, n_cts=0),
+    # O CENARIO DESLIGADO MUDOU EM 14/08/2026, e a mudanca e intencional. A linha da CTS
+    # deixou de ser somada na sub-bacia: a unica diferenca entre ligado e desligado passou
+    # a ser QUAL COLUNA E LIDA — a exclusiva ou a `*_com_cts`. Nada e somado, nada e
+    # ponderado, nada e derivado.
+    #
+    #   universo   5100 -> 3900    esta fixture NAO tem as colunas `*_com_cts`, entao o
+    #   cobertura  4800 -> 3900    desligado usa o universo EXCLUSIVO das sub-bacias e a
+    #                              area do coletor fica sem atendimento (o motor ALERTA)
+    #   vazao       430 -> 340     a vazao da CTS nao e herdada: e dado da sub-bacia, e
+    #                              quem atualiza a base para esse cenario e quem cadastra
+    #   vpl     107,72 -> 82,62 Mi menos gente ligada e sem a receita da linha da CTS
+    #
+    # NAO mudaram: capex (5.640.000) e obras (20) — as obras da CTS ja ficavam de fora.
+    #
+    # Base COM as colunas consolidadas nao perde a area sobreposta; e o caso que
+    # `test_cts.py::test_a_area_so_do_coletor_nao_e_atendida_sem_ele` cobre. Esta fixture
+    # exercita de proposito o caminho da base ainda nao atualizada.
+    False: dict(vpl=82624810.346347, capex=5640000.0, cobertura=3900.0,
+                universo=3900.0, vazao=340.0, obras=20, n_cts=0),
 }
 
 

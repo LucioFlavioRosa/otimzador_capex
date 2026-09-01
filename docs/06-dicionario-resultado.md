@@ -187,6 +187,7 @@ fatura).
 | `ete_id` / `ete_responsavel` | TEXT | a ETE do sistema |
 | `ete_nova` | BOOLEAN | ETE nova × ampliação de existente. Declarada em `TIPOS_FIXOS`: as fixtures não têm ETE, então seria inferida TEXT e o front compararia string |
 | `capacidade_modulo` / `capex_modulo` / `capex_terreno` | DOUBLE PRECISION | economia de um módulo |
+| `unidade_capacidade` | TEXT | a unidade em que as capacidades desta ETE estão, **congelada nesta rodada**. Vem de `input.ete_capex.unidade_capacidade`: trocar a medida é mudança de cadastro, e uma rodada antiga continua dizendo a que ela usou. Nula em rodada publicada antes da coluna existir — a tela mostra o número sem sufixo |
 | `modulos_disponiveis` / `modulos_construidos` | BIGINT | universo × plano |
 | `capex_modulos_construidos` | DOUBLE PRECISION | soma do CAPEX dos módulos que entraram |
 | `folga_inicial` / `capacidade_instalada` / `folga_remanescente` | DOUBLE PRECISION | capacidade antes, depois e sobra |
@@ -264,8 +265,9 @@ coluna `TEXT` e quebra `ORDER BY`/`SUM`/gráfico no front, sem erro nenhum.
 
 O tipo de cada coluna é **inferido do dtype** do DataFrame materializado. Coluna que esteja
 toda nula na rodada usada como amostra não tem dtype útil e cairia em `TEXT` — por isso o
-gerador materializa **cinco cenários** (com CTS, com ETE faseada, sem CTS com mix de WACC, e
-com/sem parcela industrial) e fica com o tipo mais específico que qualquer um revelou. O que
+gerador materializa **cinco cenários** (com CTS, com ETE faseada, sem CTS com mix de WACC, e os
+dois lados do recorte `cobertura_so_residencial`) e fica com o tipo mais específico que qualquer
+um revelou. O que
 mesmo assim nunca aparece está declarado à mão em `publicacao.TIPOS_FIXOS`, com o tipo tirado
 de quem escreve a coluna em `persistencia.py`.
 
