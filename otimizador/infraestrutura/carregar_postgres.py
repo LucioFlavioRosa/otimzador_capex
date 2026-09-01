@@ -71,32 +71,39 @@ ABAS_ESTRUTURAIS = {"unidade-regional", "regional-superintendencia", "superinten
                     "regional-operacional"}
 
 
-#: Aba -> (tabela de destino, {coluna_da_aba: coluna_da_tabela}) para CARGA.
+#: Aba -> DESTINOS na carga: `[(tabela, colunas_ou_None, {coluna_da_aba: coluna_da_tabela})]`.
 #:
-#: E o inverso de `ABAS_INPUT`, e existe separado porque os dois sentidos nao sao
-#: simetricos: ler `regional-superintendencia` e uma PROJECAO de `empresa`, e escrever de
-#: volta precisa saber que `superintendencia_id` vira `emp_codigo`. Um mapa so, de aba
-#: para tabela, nao consegue expressar isso — e foi tentar expressar que quebrou o
-#: carregador de fixture quando a v8 chegou.
+#: E o inverso de `ABAS_INPUT`, e existe separado porque os dois sentidos NAO sao
+#: simetricos. Ler `regional-superintendencia` e uma projecao de `empresa`; escrever de
+#: volta precisa saber que `superintendencia_id` vira `emp_codigo`. E a aba
+#: `superintendencia-cidade` alimenta DUAS tabelas — o municipio passou a existir por si
+#: (`cidade`) e o vinculo ficou em `cidade_empresa` —, o que um mapa de um-para-um nao
+#: consegue dizer.
+#:
+#: `colunas=None` significa "todas as que a tabela tiver". A ORDEM da lista importa:
+#: `cidade` antes de `cidade_empresa`, senao a FK reprova.
 #:
 #: Usado por `scripts/smoke_test_postgres.py` para semear um Postgres de teste.
 TABELAS_DE_CARGA = {
-    "unidade-regional":            ("unidade_regional", {}),
-    "regional-superintendencia":   ("empresa", {"superintendencia_id": "emp_codigo"}),
-    "superintendencia-cidade":     ("cidade_empresa", {"superintendencia_id": "emp_codigo"}),
-    "cidade-sistema":              ("cidade_sistema", {}),
-    "sistema-topologia":           ("sistema_topologia", {}),
-    "cidade-operacional":          ("cidade_operacional", {}),
-    "subbacia-operacional":        ("subbacia_operacional", {}),
-    "componentes-subbacias-capex": ("componentes_subbacias_capex", {}),
-    "ete-capex":                   ("ete_capex", {}),
-    "regional-operacional":        ("regional_operacional", {}),
-    "metas-cobertura":             ("metas_cobertura", {}),
-    "fator-esgoto":                ("fator_esgoto", {}),
-    "subbacia-cts":                ("subbacia_cts", {}),
-    "cts-operacional":             ("cts_operacional", {}),
-    "componentes-cts-capex":       ("componentes_cts_capex", {}),
-    "orcamento":                   ("orcamento", {}),
+    "unidade-regional":            [("unidade_regional", None, {})],
+    "regional-superintendencia":   [("empresa", ["emp_codigo", "unidade_id"],
+                                     {"superintendencia_id": "emp_codigo"})],
+    "superintendencia-cidade":     [("cidade", ["cidade_id", "cidade_name"], {}),
+                                    ("cidade_empresa", ["cidade_id", "emp_codigo"],
+                                     {"superintendencia_id": "emp_codigo"})],
+    "cidade-sistema":              [("cidade_sistema", None, {})],
+    "sistema-topologia":           [("sistema_topologia", None, {})],
+    "cidade-operacional":          [("cidade_operacional", None, {})],
+    "subbacia-operacional":        [("subbacia_operacional", None, {})],
+    "componentes-subbacias-capex": [("componentes_subbacias_capex", None, {})],
+    "ete-capex":                   [("ete_capex", None, {})],
+    "regional-operacional":        [("regional_operacional", None, {})],
+    "metas-cobertura":             [("metas_cobertura", None, {})],
+    "fator-esgoto":                [("fator_esgoto", None, {})],
+    "subbacia-cts":                [("subbacia_cts", None, {})],
+    "cts-operacional":             [("cts_operacional", None, {})],
+    "componentes-cts-capex":       [("componentes_cts_capex", None, {})],
+    "orcamento":                   [("orcamento", None, {})],
 }
 
 

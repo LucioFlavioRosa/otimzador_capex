@@ -847,3 +847,25 @@ def test_spark_antigo_sem_a_api_cai_para_criacao(monkeypatch):
 
     (esc,) = estado["escritas"]
     assert esc["mode"] == "append" and "replaceWhere" not in esc["options"]
+
+
+# ------------------------------------------------- estabilidade do banco_md5
+def test_banco_md5_nao_muda_com_a_ordem_nem_com_o_tipo():
+    """O hash responde "o cadastro mudou?", e nao "a leitura veio diferente?".
+
+    As consultas de `abas_do_postgres` sao `SELECT` sem `ORDER BY`: o Postgres pode
+    devolver o mesmo conjunto em outra ordem entre duas execucoes. E `Decimal("1.0")`,
+    `1.0` e `1` sao o mesmo numero em drivers diferentes. Se qualquer um dos dois mexesse
+    no hash, a auditoria acusaria uma troca de banco que nunca houve.
+    """
+    from decimal import Decimal
+    from otimizador.infraestrutura.persistencia import _md5
+
+    base = {"a": [{"x": 1, "y": None}, {"x": 2, "y": "z"}]}
+    outra_ordem = {"a": [{"y": "z", "x": 2}, {"y": None, "x": 1}]}
+    outro_tipo = {"a": [{"x": Decimal("1.0"), "y": None}, {"x": 2.0, "y": "z"}]}
+
+    assert _md5(base) == _md5(outra_ordem)
+    assert _md5(base) == _md5(outro_tipo)
+    # e o que E mudanca de dado continua aparecendo
+    assert _md5(base) != _md5({"a": [{"x": 9, "y": None}, {"x": 2, "y": "z"}]})

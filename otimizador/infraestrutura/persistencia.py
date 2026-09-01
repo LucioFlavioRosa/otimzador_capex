@@ -77,11 +77,52 @@ def _md5(abas):
     arquivo, e o hash de um xlsx mudaria a cada gravacao mesmo com o dado identico
     (o formato guarda data de modificacao).
 
-    `sort_keys` e `default=str`: a mesma carga tem de dar o mesmo hash em duas maquinas, e
-    a ordem de um dict e a repr de um Decimal nao podem decidir isso."""
+    A CANONICALIZACAO TEM DE INCLUIR A ORDEM DAS LINHAS, e nao so a das chaves. As
+    consultas de `abas_do_postgres` sao `SELECT` sem `ORDER BY`: o Postgres pode devolver
+    o mesmo conjunto em ordem diferente entre duas execucoes, e um hash sensivel a isso
+    diria que duas rodadas usaram bancos diferentes quando so mudou a ordem de leitura —
+    a auditoria acusaria uma mudanca que nao houve.
+
+    Por isso cada aba e ordenada pela representacao canonica da propria linha antes de
+    entrar no hash. E `str` no valor, e nao `default=str`: assim `Decimal("1.0")`, `1.0` e
+    `1` — que driver e fonte podem produzir para o mesmo numero — nao mudam o hash por
+    diferenca de tipo, so por diferenca de valor.
+
+    DUAS COLISOES SAO ACEITAS DE PROPOSITO, e vale saber quais:
+
+      `None` e `""` dao o mesmo hash. No cadastro os dois significam "nao preenchido", e o
+        proprio motor os trata junto (`if _d.get(_un) in (None,"")`). Distingui-los faria o
+        hash mudar quando o driver troca NULL por vazio, que nao e mudanca de dado.
+      `1` e `"1"` dao o mesmo hash. O tipo de uma coluna e do schema, nao da linha: dentro
+        de uma mesma fonte ele nao varia. Separa-los reintroduziria justamente o alarme
+        falso por driver que esta funcao existe para eliminar.
+
+    O que o hash responde e "o cadastro mudou?", e nao "a serializacao mudou?"."""
     import json
+    from decimal import Decimal
+
+    def _valor(v):
+        # NUMERO vira forma canonica; TEXTO fica texto. `1`, `1.0` e `Decimal("1.0")` sao o
+        # mesmo numero em drivers diferentes e nao podem mudar o hash — mas a string "1" e
+        # outro tipo de dado, e essa diferenca continua aparecendo.
+        if v is None:
+            return ""
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (int, float, Decimal)):
+            f = float(v)
+            return repr(int(f)) if f == int(f) else repr(f)
+        return str(v)
+
+    def _linha(l):
+        return {k: _valor(v) for k, v in l.items()}
     try:
-        bruto = json.dumps(abas, sort_keys=True, default=str, ensure_ascii=False)
+        canon = {
+            aba: sorted((_linha(l) for l in (linhas or [])),
+                        key=lambda d: json.dumps(d, sort_keys=True, ensure_ascii=False))
+            for aba, linhas in (abas or {}).items()
+        }
+        bruto = json.dumps(canon, sort_keys=True, ensure_ascii=False)
         return _hl.md5(bruto.encode("utf-8")).hexdigest()
     except Exception:
         return None

@@ -43,3 +43,28 @@ def test_valor_do_banco_e_ignorado():
     cen = silent(M.ler_banco, abas, cobertura_so_residencial=False)
     # se a engine tivesse usado o 0 do banco, nenhuma coleta teria ligacoes novas
     assert any(col.lig > 0 for col in cen.coletas), "a engine usou o valor (errado) do banco em vez de derivar"
+
+
+def test_ler_banco_nao_altera_as_abas_que_recebe():
+    """O leitor NAO pode escrever na entrada — e o snapshot de auditoria depende disso.
+
+    `ler_banco` deriva `*_novas_obras` por cima do que veio e, no modo sem CTS, troca as
+    colunas exclusivas pelas consolidadas. Se essas escritas caissem no dicionario do
+    chamador, o `abas_fonte` que o job usa como copia congelada do cadastro publicaria o
+    dado JA DERIVADO como se fosse o input bruto: a rodada continuaria certa, e a
+    auditoria passaria a mentir sobre a origem — sem erro em lugar nenhum.
+
+    Antes o acaso protegia: o snapshot vinha de uma segunda leitura do arquivo. Com a
+    fonte em memoria, os dois passaram a ser o MESMO objeto.
+    """
+    import copy
+    M = engine()
+    abas = banco(BANK_CLASSE)
+    # zera para garantir que a derivacao TEM o que reescrever
+    for linha in abas["subbacia-operacional"]:
+        linha["ligacoes_novas_obras"] = 0
+    antes = copy.deepcopy(abas)
+
+    silent(M.ler_banco, abas, cobertura_so_residencial=False)
+
+    assert abas == antes, "ler_banco alterou as abas recebidas"

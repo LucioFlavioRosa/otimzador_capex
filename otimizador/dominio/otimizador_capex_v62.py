@@ -897,9 +897,17 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     fim_cid={_c:int(num(_d.get("data_fim_concessao"),0)) for _c,_d in cidop.items()}
     _sisop={d["sistema_id"]:d for d in L("sistema-operacional")}                       # compat: fim por sistema (bancos antigos)
     fim_sis={_s:int(num(_d.get("data_fim_concessao"),0)) for _s,_d in _sisop.items()}
-    subop={(d.get("sub_bacia") or d.get("subsistema_id")):d for d in L("subbacia-operacional","subsistema-operacional")}
+    # `dict(d)`, e nao `d`: ADIANTE ESTA FUNCAO ESCREVE nestas linhas — as colunas
+    # `*_novas_obras` sao derivadas por cima do que veio, e no modo sem CTS as colunas
+    # exclusivas recebem o valor consolidado. Sem a copia, quem chamou fica com o dicionario
+    # ALTERADO, e o `abas_fonte` do snapshot publicaria o dado JA DERIVADO como se fosse o
+    # input bruto — a auditoria passaria a mentir sobre a origem.
+    #
+    # Copia RASA e o bastante: os valores sao escalares, e o que nao pode ser compartilhado
+    # e o dicionario da linha.
+    subop={(d.get("sub_bacia") or d.get("subsistema_id")):dict(d) for d in L("subbacia-operacional","subsistema-operacional")}
     # ---- CTS (Coletor de Tempo Seco): estrutura irma da sub-bacia, pareada 1:1 pela aba subbacia-cts ----
-    _cts_op={d.get("cts"): d for d in L("cts-operacional") if d.get("cts")}
+    _cts_op={d.get("cts"): dict(d) for d in L("cts-operacional") if d.get("cts")}   # copia: ver `subop` acima
     _cts_dep={d.get("sub_bacia"): d.get("cts") for d in L("subbacia-cts") if d.get("sub_bacia") and d.get("cts")}
     _cts_ids_all=set(_cts_op)
     # ---- RECORTE DA COBERTURA: total x so residencial -----------------------------
