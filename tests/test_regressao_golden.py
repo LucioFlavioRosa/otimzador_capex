@@ -9,7 +9,7 @@ numero fixo (que variaria entre versoes de OR-Tools)."""
 import pytest
 from _helpers import load_cts, build_all, capex_total, cobertura_fim, silent, solver_or_skip
 
-# valores de referencia (banco_teste_CTS_poc_v2.xlsx) — congelados em 2026-07
+# valores de referencia (banco_teste_CTS_poc_v2) — congelados em 2026-07
 GOLDEN = {
     True:  dict(vpl=107303304.663241, capex=6476000.0, cobertura=4800.0,
                 universo=5100.0, vazao=430.0, obras=28, n_cts=2),

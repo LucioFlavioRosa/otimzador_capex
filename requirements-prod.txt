@@ -1,7 +1,6 @@
 # Execução do pipeline em produção (Databricks)
 ortools>=9.7
 pandas>=1.5
-openpyxl>=3.1
 matplotlib>=3.5           # dashboard_otimizador_v2, que persistencia.set_engine exige
                           # (o job importa; no DBR vem pré-instalado, num venv limpo não)
 # Postgres

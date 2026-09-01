@@ -21,6 +21,7 @@ Se um dia sobrar coluna TEXT que voce sabe ser numerica, o lugar de corrigir e o
 """
 import io
 import contextlib
+import json
 import os
 import sys
 
@@ -38,13 +39,13 @@ from otimizador.infraestrutura import persistencia as P             # noqa: E402
 from otimizador.infraestrutura import publicacao as PUB             # noqa: E402
 
 FIXTURES = [
-    ("tests/fixtures/banco_teste_CTS_poc_v2.xlsx", dict(usar_cts=True)),
-    ("tests/fixtures/banco_teste_CTS_poc_v2.xlsx", dict(usar_cts=True, ete_faseada=True)),
-    ("tests/fixtures/banco_fixture_testes.xlsx",   dict(unidade="u1")),
+    ("tests/fixtures/banco_teste_CTS_poc_v2.json", dict(usar_cts=True)),
+    ("tests/fixtures/banco_teste_CTS_poc_v2.json", dict(usar_cts=True, ete_faseada=True)),
+    ("tests/fixtures/banco_fixture_testes.json",   dict(unidade="u1")),
     # Os dois lados do recorte da meta: a fixture `classe` tem colunas residenciais, e
     # rodar os dois garante que o DDL gerado cobre as colunas que cada modo publica.
-    ("tests/fixtures/banco_fixture_classe.xlsx",   dict(cobertura_so_residencial=False)),
-    ("tests/fixtures/banco_fixture_classe.xlsx",   dict(cobertura_so_residencial=True)),
+    ("tests/fixtures/banco_fixture_classe.json",   dict(cobertura_so_residencial=False)),
+    ("tests/fixtures/banco_fixture_classe.json",   dict(cobertura_so_residencial=True)),
 ]
 
 CABECALHO = """-- ============================================================================
@@ -70,7 +71,9 @@ CABECALHO = """-- ==============================================================
 def _materializar(caminho, kwargs):
     """Uma rodada build-all (deterministica, sem solver) -> dict de DataFrames."""
     with contextlib.redirect_stdout(io.StringIO()):
-        cen = M.ler_banco(os.path.join(ROOT, caminho), orcamento=1e12, **kwargs)
+        with open(os.path.join(ROOT, caminho), encoding="utf-8") as f:
+            abas = json.load(f)
+        cen = M.ler_banco(abas, orcamento=1e12, **kwargs)
         plano = {oid: max(0, int(o.inicio_min)) for oid, o in cen.obras.items() if o.eh_aegea()}
         return P.materializar(cen, M.avaliar(cen, plano), run_id="ddl", banco="ddl")
 

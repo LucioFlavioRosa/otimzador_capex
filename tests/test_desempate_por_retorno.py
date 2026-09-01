@@ -18,7 +18,7 @@ O QUE OS TESTES GARANTEM, e nesta ordem de importancia:
 """
 import pytest
 
-from _helpers import BANK_CTS, engine, silent, solver_or_skip
+from _helpers import BANK_CTS, banco, engine, silent, solver_or_skip
 
 
 ORC_APERTADO = {2026: 2e6, 2027: 2e6, 2028: 2e6, 2029: 2e6}
@@ -62,7 +62,7 @@ def _cenario(**kw):
     opcoes = dict(orcamento=ORC_APERTADO, usar_cts=True, foco_cobertura=1.0,
                   penalidade_cobertura="meta+cobertura")
     opcoes.update(kw)
-    return silent(M.ler_banco, BANK_CTS, **opcoes)
+    return silent(M.ler_banco, banco(BANK_CTS), **opcoes)
 
 
 @pytest.mark.solver

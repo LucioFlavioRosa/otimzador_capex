@@ -105,7 +105,7 @@ from otimizador.dominio import otimizador_capex_v62 as M
 from otimizador.infraestrutura import persistencia as P, publicacao as PUB
 D.set_engine(M); P.set_engine(M, D)
 
-cen  = M.ler_banco("tests/fixtures/banco_teste_CTS_poc_v2.xlsx", orcamento=1e9)
+cen  = M.ler_banco(abas_do_postgres(pg_url), orcamento=1e9)
 plano = {oid: max(0, int(o.inicio_min)) for oid, o in cen.obras.items() if o.eh_aegea()}
 tabs = P.materializar(cen, M.avaliar(cen, plano), run_id="ddl", banco="ddl")
 
@@ -335,7 +335,7 @@ Comece por aí.
 | Pendência | Impacto | Quando encarar |
 |---|---|---|
 | Wheel + CI | instalação manual; sem gate automático de código | antes do primeiro deploy "de verdade" |
-| `ler_banco` aceitar DataFrames | `.xlsx` temporário no driver | depois de validado em produção |
+| — | — | — |
 | `input` sem discriminador de unidade | cada rodada lê o cadastro inteiro | quando o cadastro nacional crescer |
 | `psycopg2.sql.Identifier` | schema/tabela/coluna por f-string | manutenção |
 | Testes de `publicacao.py` nunca executados | ver `04-testes-executar.md` §4 | **primeira coisa** ao subir o banco |

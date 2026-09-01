@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import io
 import contextlib
+import json
 import os
 import sys
 import traceback
@@ -49,7 +50,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 SQL = os.path.join("otimizador", "infraestrutura", "sql")
 
-FIXTURE_PADRAO = os.path.join("tests", "fixtures", "banco_teste_CTS_poc_v2.xlsx")
+FIXTURE_PADRAO = os.path.join("tests", "fixtures", "banco_teste_CTS_poc_v2.json")
 RUN_ID = "smoke_0001"
 
 # ORDEM DE CARGA — nao e a ordem do ABAS_INPUT.
@@ -213,17 +214,21 @@ def passo_carga(conn, rel, s_in, fixture):
         rel.falha("carrega o cadastro", f"fixture nao encontrada: {caminho}")
         return False
 
-    xl = pd.ExcelFile(caminho)
+    with open(caminho, encoding="utf-8") as f:
+        abas = json.load(f)
     total, descartadas = 0, []
     try:
         with conn:
             with conn.cursor() as cur:
                 for aba in ORDEM_CARGA:
-                    tabela = C.ABAS_INPUT[aba]
-                    if aba not in xl.sheet_names:
+                    if aba not in abas or not abas[aba]:
                         continue
-                    df = pd.read_excel(caminho, sheet_name=aba)
-                    df.columns = [_norm(c) for c in df.columns]
+                    # `TABELAS_DE_CARGA`, e nao `ABAS_INPUT`: aquele mapa guarda a CONSULTA
+                    # de leitura, que para a hierarquia v8 e uma projecao — escrever de
+                    # volta precisa do nome da tabela e do de-para das colunas.
+                    tabela, renomear = C.TABELAS_DE_CARGA[aba]
+                    df = pd.DataFrame(abas[aba])
+                    df.columns = [renomear.get(_norm(c), _norm(c)) for c in df.columns]
                     cols_db = _colunas(conn, s_in, tabela)
                     fora = [c for c in df.columns if c not in cols_db and not c.startswith("unnamed")]
                     if fora:

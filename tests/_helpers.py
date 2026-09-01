@@ -10,14 +10,34 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-# A suite e AUTOSSUFICIENTE: le so de tests/fixtures/ (nao depende de subir os bancos grandes).
+# A suite e AUTOSSUFICIENTE: le so de tests/fixtures/, e sem subir banco nenhum.
+#
+# AS FIXTURES SAO JSON, e nao planilha. O motor recebe as ABAS ja em dicionario
+# (`ler_banco(abas)`), entao a fixture e exatamente esse dicionario, serializado. Ganha-se
+# o que um .xlsx nao da num repositorio: o diff de uma fixture e legivel, e mudar uma
+# celula aparece na revisao em vez de virar um blob binario.
+#
+# `banco(...)` devolve uma COPIA PROFUNDA a cada chamada. As fixtures sao lidas uma vez e
+# ficam em cache, e mais de um teste altera o dicionario para montar seu cenario — sem a
+# copia, o primeiro que escreve contamina todos os seguintes, e a ordem dos testes passa a
+# decidir o resultado.
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
-BANK_CTS = os.path.join(FIXTURES, "banco_teste_CTS_poc_v2.xlsx")     # com CTS (2 coletores)
-BANK_FIXTURE = os.path.join(FIXTURES, "banco_fixture_testes.xlsx")   # SEM CTS + mix de WACC
-BANK_CLASSE = os.path.join(FIXTURES, "banco_fixture_classe.xlsx")    # industrial em b1/b3; c1=economias, c2=populacao
-# opcional: banco grande realista, se estiver presente na sessao (nao e exigido pelos testes)
-BANK_V28 = os.path.join(ROOT, "banco_dados_regional_v28_nomescanonicos.xlsx")
+BANK_CTS = os.path.join(FIXTURES, "banco_teste_CTS_poc_v2.json")     # com CTS (2 coletores)
+BANK_FIXTURE = os.path.join(FIXTURES, "banco_fixture_testes.json")   # SEM CTS + mix de WACC
+BANK_CLASSE = os.path.join(FIXTURES, "banco_fixture_classe.json")    # industrial em b1/b3; c1=economias, c2=populacao
 UNIDADE_FIXTURE = "u1"
+
+_CACHE: dict = {}
+
+
+def banco(caminho):
+    """As abas da fixture, como `ler_banco` as espera — copia nova a cada chamada."""
+    import copy
+    import json
+    if caminho not in _CACHE:
+        with open(caminho, encoding="utf-8") as f:
+            _CACHE[caminho] = json.load(f)
+    return copy.deepcopy(_CACHE[caminho])
 
 # orcamento FOLGADO: garante que o solver constroi tudo no inicio => solver == build-all
 ORC_SLACK = {2026: 50e6, 2027: 50e6, 2028: 50e6, 2029: 50e6}
@@ -60,25 +80,27 @@ def solver_or_skip():
 
 def load_cts(usar_cts, orc=None):
     M = engine()
-    return silent(M.ler_banco, BANK_CTS, orcamento=orc or ORC_SLACK, usar_cts=usar_cts)
+    return silent(M.ler_banco, banco(BANK_CTS), orcamento=orc or ORC_SLACK, usar_cts=usar_cts)
 
 
-def load_unidade(banco, unidade, usar_cts=True):
+def load_unidade(fonte, unidade, usar_cts=True):
     M = engine()
-    return silent(M.ler_banco, banco, unidade=unidade, usar_cts=usar_cts)
+    return silent(M.ler_banco, banco(fonte) if isinstance(fonte, str) else fonte,
+                  unidade=unidade, usar_cts=usar_cts)
 
 
 def load_fixture(usar_cts=True, unidade=UNIDADE_FIXTURE, cobertura_so_residencial=False):
     """Banco fixo SEM CTS (com mix de WACC) que acompanha a suite — sempre presente."""
     M = engine()
-    return silent(M.ler_banco, BANK_FIXTURE, unidade=unidade, usar_cts=usar_cts,
+    return silent(M.ler_banco, banco(BANK_FIXTURE), unidade=unidade, usar_cts=usar_cts,
                   cobertura_so_residencial=cobertura_so_residencial)
 
 
 def load_classe(cobertura_so_residencial=False):
     """Banco com parcela industrial (b1/b3) e cobertura por economias (c1) e populacao (c2)."""
     M = engine()
-    return silent(M.ler_banco, BANK_CLASSE, cobertura_so_residencial=cobertura_so_residencial)
+    return silent(M.ler_banco, banco(BANK_CLASSE),
+                  cobertura_so_residencial=cobertura_so_residencial)
 
 
 def build_all(cen):
