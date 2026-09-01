@@ -31,20 +31,33 @@ CREATE TABLE IF NOT EXISTS input.unidade_regional (
     wacc_medio    double precision
 );
 
--- aba do motor: regional-superintendencia
-CREATE TABLE IF NOT EXISTS input.regional_superintendencia (
-    superintendencia_id   text PRIMARY KEY,
-    superintendencia_name text,
-    unidade_id            text NOT NULL
-        REFERENCES input.unidade_regional(unidade_id)
+-- HIERARQUIA v8: a EMPRESA OPERADORA no lugar da superintendencia.
+--
+-- A superintendencia era um nivel de reserva que fonte nenhuma trazia. A v8 a substituiu
+-- pela empresa, que e real e vem do de-para, e partiu o antigo `superintendencia_cidade`
+-- em duas: o municipio passa a existir por si (`cidade`) e o vinculo fica em
+-- `cidade_empresa`.
+--
+-- O MOTOR NAO MUDOU DE VOCABULARIO: ele ainda le as abas `regional-superintendencia` e
+-- `superintendencia-cidade`. Quem traduz e `carregar_postgres.ABAS_INPUT`, com um `AS`
+-- que projeta `emp_codigo` como `superintendencia_id`. As tabelas aqui sao as do
+-- CADASTRO; as abas sao o que o motor pede.
+CREATE TABLE IF NOT EXISTS input.empresa (
+    emp_codigo         text PRIMARY KEY,
+    empresa            text,
+    unidade_id         text NOT NULL
+        REFERENCES input.unidade_regional(unidade_id),
+    data_fim_concessao integer
 );
 
--- aba do motor: superintendencia-cidade
-CREATE TABLE IF NOT EXISTS input.superintendencia_cidade (
-    cidade_id           text PRIMARY KEY,
-    cidade_name         text,
-    superintendencia_id text NOT NULL
-        REFERENCES input.regional_superintendencia(superintendencia_id)
+CREATE TABLE IF NOT EXISTS input.cidade (
+    cidade_id   text PRIMARY KEY,
+    cidade_name text
+);
+
+CREATE TABLE IF NOT EXISTS input.cidade_empresa (
+    cidade_id  text PRIMARY KEY REFERENCES input.cidade(cidade_id),
+    emp_codigo text NOT NULL REFERENCES input.empresa(emp_codigo)
 );
 
 -- aba do motor: cidade-sistema
@@ -56,7 +69,7 @@ CREATE TABLE IF NOT EXISTS input.cidade_sistema (
     sistema_id      text PRIMARY KEY,
     sistema_name    text,
     cidade_id       text NOT NULL
-        REFERENCES input.superintendencia_cidade(cidade_id),
+        REFERENCES input.cidade(cidade_id),
     usa_sistema_cts boolean NOT NULL DEFAULT false
 );
 
@@ -82,7 +95,7 @@ CREATE TABLE IF NOT EXISTS input.sistema_topologia (
 -- aba do motor: cidade-operacional
 CREATE TABLE IF NOT EXISTS input.cidade_operacional (
     cidade_id          text PRIMARY KEY
-        REFERENCES input.superintendencia_cidade(cidade_id),
+        REFERENCES input.cidade(cidade_id),
     data_fim_concessao integer,
     unidade_cobertura  text
 );
@@ -200,9 +213,14 @@ CREATE TABLE IF NOT EXISTS input.regional_operacional (
 -- FALLBACK do teto de CAPEX quando ORCAMENTO nao vem no run_request. Sem esta tabela
 -- E sem o parametro, o motor usa INF: no caminho do solver isso estoura la dentro do
 -- CP-SAT com "OverflowError: cannot convert float infinity to integer".
+-- A CHAVE E (regional_id, ano), e nao so `regional_id`: o teto de CAPEX e por ANO, e uma
+-- chave sem ano so consegue guardar um valor por regional — o cronograma inteiro caberia
+-- numa linha so, e a ultima gravacao apagaria as outras.
 CREATE TABLE IF NOT EXISTS input.orcamento (
-    regional_id text PRIMARY KEY,
-    valor_ano   double precision NOT NULL
+    regional_id text NOT NULL,
+    ano         integer NOT NULL,
+    valor_ano   double precision NOT NULL,
+    PRIMARY KEY (regional_id, ano)
 );
 
 -- ---- METAS E PARIDADE -----------------------------------------------------
@@ -283,8 +301,8 @@ CREATE TABLE IF NOT EXISTS input.componentes_cts_capex (
 
 -- ---- INDICES que o backend/front consultam --------------------------------
 CREATE INDEX IF NOT EXISTS ix_unidade_regional ON input.unidade_regional (regional_id);
-CREATE INDEX IF NOT EXISTS ix_sup_unidade      ON input.regional_superintendencia (unidade_id);
-CREATE INDEX IF NOT EXISTS ix_cidade_sup       ON input.superintendencia_cidade (superintendencia_id);
+CREATE INDEX IF NOT EXISTS ix_empresa_unidade  ON input.empresa (unidade_id);
+CREATE INDEX IF NOT EXISTS ix_cidade_empresa   ON input.cidade_empresa (emp_codigo);
 CREATE INDEX IF NOT EXISTS ix_sistema_cidade   ON input.cidade_sistema (cidade_id);
 CREATE INDEX IF NOT EXISTS ix_topo_sistema     ON input.sistema_topologia (sistema_id);
 CREATE INDEX IF NOT EXISTS ix_topo_jusante     ON input.sistema_topologia (componente_sistema_id_jusante);

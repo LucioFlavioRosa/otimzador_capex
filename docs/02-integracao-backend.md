@@ -126,7 +126,7 @@ Duas consequências que valem estar escritas:
 
 Enquanto a exportação não trouxer os valores apurados, as oito são derivadas
 (`exclusiva + CTS pareada`, que reproduz exatamente a soma antiga) por
-`dev/preencher_sobreposicao_cts.py`, e a planilha marca isso em `sobreposicao_origem`
+a carga do cadastro, e a origem fica marcada em `sobreposicao_origem`
 (`derivado_soma` | `sem_cts`). Coluna ausente faz o motor voltar a somar, avisando.
 
 **População não tem versão residencial**: indústria não mora, então `universo_populacao` já é
@@ -136,7 +136,7 @@ residencial. Cidade que mede a meta em população ignora as quatro colunas acim
 apuração de quantas ligações e economias são residenciais é da base comercial, e é ela que
 deve preenchê-las. Enquanto a exportação não as trouxer, elas são derivadas
 (`total − parcela industrial`, economias pela proporção das ligações) por
-`dev/preencher_recorte_residencial.py` no repositório do backend, e a planilha marca isso na
+a carga do cadastro, e a origem fica marcada na
 coluna de controle `residencial_origem` (`derivado` | `sem_industria`). **Valor derivado não
 é medição** — quem usa o resultado de uma rodada só-residencial precisa saber qual dos dois
 está lendo.

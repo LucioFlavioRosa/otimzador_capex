@@ -45,7 +45,7 @@ que vem depois.
 python main.py experimento
 ```
 
-Isso carrega um banco de teste `.xlsx`, roda o solver OR-Tools, materializa as 14 tabelas em
+Isso carrega um banco de teste (JSON de abas), roda o solver OR-Tools, materializa as 14 tabelas em
 memória e passa o portão de qualidade. Saída:
 
 ```

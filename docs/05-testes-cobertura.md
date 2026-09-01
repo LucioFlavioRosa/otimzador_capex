@@ -276,7 +276,7 @@ Honestidade sobre as lacunas, para ninguém confiar demais na suíte verde:
 
 | Lacuna | Risco | Mitigação hoje |
 |---|---|---|
-| `otimizador/infraestrutura/carregar_postgres.py` sem teste de integração | o adaptador de leitura nunca leu de um Postgres real | `_roundtrip_xlsx` prova que a materialização em xlsx não altera o Cenário; a leitura em si é `SELECT *` |
+| `otimizador/infraestrutura/carregar_postgres.py` sem teste de integração | o adaptador de leitura nunca leu de um Postgres real | as consultas são `SELECT *`, exceto as duas projeções da hierarquia v8; `scripts/smoke_test_postgres.py` cobre o caminho ponta a ponta contra um Postgres de verdade |
 | `job_databricks.rodar()` contra um banco real | a orquestração é exercitada com o Postgres **dublado** (§5.6); nunca rodou contra um banco de verdade em teste automatizado | o `main.py smoke` faz esse caminho, mas é manual — não é gate |
 | `otimizador/apresentacao/leitor_v2.py` | contrato de leitura sem teste automatizado | é o módulo que prova o contrato — merece teste |
 | `otimizador/apresentacao/dashboard_otimizador_v2.py` | explicabilidade sem teste | usado só pela materialização |

@@ -69,12 +69,61 @@ def novo_run_id(prefixo="run"):
     return f"{prefixo}_{_dt.datetime.now():%Y%m%d_%H%M%S}_{_uuid.uuid4().hex[:6]}"
 
 
-def _md5(caminho):
+def _md5(abas):
+    """Impressao digital do INPUT da rodada, gravada em `run_meta.banco_md5`.
+
+    E o que responde "esta rodada foi feita sobre o mesmo dado que aquela?" sem comparar
+    tabela por tabela. Sobre as ABAS, e nao sobre um arquivo: o input nao e mais um
+    arquivo, e o hash de um xlsx mudaria a cada gravacao mesmo com o dado identico
+    (o formato guarda data de modificacao).
+
+    A CANONICALIZACAO TEM DE INCLUIR A ORDEM DAS LINHAS, e nao so a das chaves. As
+    consultas de `abas_do_postgres` sao `SELECT` sem `ORDER BY`: o Postgres pode devolver
+    o mesmo conjunto em ordem diferente entre duas execucoes, e um hash sensivel a isso
+    diria que duas rodadas usaram bancos diferentes quando so mudou a ordem de leitura —
+    a auditoria acusaria uma mudanca que nao houve.
+
+    Por isso cada aba e ordenada pela representacao canonica da propria linha antes de
+    entrar no hash. E `str` no valor, e nao `default=str`: assim `Decimal("1.0")`, `1.0` e
+    `1` — que driver e fonte podem produzir para o mesmo numero — nao mudam o hash por
+    diferenca de tipo, so por diferenca de valor.
+
+    DUAS COLISOES SAO ACEITAS DE PROPOSITO, e vale saber quais:
+
+      `None` e `""` dao o mesmo hash. No cadastro os dois significam "nao preenchido", e o
+        proprio motor os trata junto (`if _d.get(_un) in (None,"")`). Distingui-los faria o
+        hash mudar quando o driver troca NULL por vazio, que nao e mudanca de dado.
+      `1` e `"1"` dao o mesmo hash. O tipo de uma coluna e do schema, nao da linha: dentro
+        de uma mesma fonte ele nao varia. Separa-los reintroduziria justamente o alarme
+        falso por driver que esta funcao existe para eliminar.
+
+    O que o hash responde e "o cadastro mudou?", e nao "a serializacao mudou?"."""
+    import json
+    from decimal import Decimal
+
+    def _valor(v):
+        # NUMERO vira forma canonica; TEXTO fica texto. `1`, `1.0` e `Decimal("1.0")` sao o
+        # mesmo numero em drivers diferentes e nao podem mudar o hash — mas a string "1" e
+        # outro tipo de dado, e essa diferenca continua aparecendo.
+        if v is None:
+            return ""
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (int, float, Decimal)):
+            f = float(v)
+            return repr(int(f)) if f == int(f) else repr(f)
+        return str(v)
+
+    def _linha(l):
+        return {k: _valor(v) for k, v in l.items()}
     try:
-        # `with`: este arquivo costuma ser o snapshot temporario que o job apaga logo
-        # depois — handle pendurado impede a remocao no Windows.
-        with open(caminho, "rb") as f:
-            return _hl.md5(f.read()).hexdigest()
+        canon = {
+            aba: sorted((_linha(l) for l in (linhas or [])),
+                        key=lambda d: json.dumps(d, sort_keys=True, ensure_ascii=False))
+            for aba, linhas in (abas or {}).items()
+        }
+        bruto = json.dumps(canon, sort_keys=True, ensure_ascii=False)
+        return _hl.md5(bruto.encode("utf-8")).hexdigest()
     except Exception:
         return None
 
@@ -102,19 +151,18 @@ def _j(x):
 #  MATERIALIZACAO
 # =============================================================================
 def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapshot=True,
-                 economia=True, arquivo_fonte=None):
+                 economia=True, abas_fonte=None):
     """cen + res -> dict {nome_tabela: DataFrame}. Nao escreve nada em disco.
 
     `banco` e o ROTULO da origem, gravado em run_meta.banco_arquivo. No caminho Excel ele
     e o proprio caminho do arquivo; no caminho Postgres e algo como 'postgres://input',
     que descreve a origem mas nao existe em disco.
 
-    `arquivo_fonte` (opcional) e o ARQUIVO de onde tirar o snapshot__* e o banco_md5,
-    quando ele nao coincide com o rotulo. E o que permite o job do Postgres preservar a
-    copia congelada do cadastro — sem isso, `_os.path.exists('postgres://input')` e falso
-    e a rodada sai sem snapshot nenhum, quebrando a reproducao/auditoria.
+    `abas_fonte` (opcional) sao as ABAS lidas para montar o Cenario — o mesmo dicionario
+    que `ler_banco` recebeu. Delas saem as tabelas `snapshot__*`, a copia congelada do
+    cadastro que sustenta reproducao e auditoria. Sem elas a rodada sai sem snapshot: o
+    plano continua certo, mas ninguem consegue mais dizer sobre QUE dado ele foi feito.
     """
-    fonte = arquivo_fonte or banco
     M = _eng()
     rid = run_id or novo_run_id()
     reg = list(cen.regionais)[0]
@@ -138,7 +186,7 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
         "engine_arquivo": getattr(M, "__file__", None),
         "engine_md5": _md5(getattr(M, "__file__", "") or ""),
         "banco_arquivo": banco,
-        "banco_md5": _md5(fonte) if fonte else None,
+        "banco_md5": _md5(abas_fonte) if abas_fonte else None,
         "regional": reg,
         "anos_horizonte": anos,
         "anos_capex": ac,
@@ -432,8 +480,8 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
         columns=["run_id", "tipo", "ano", "gasto", "teto", "excesso", "detalhe"])
 
     # -------------------------------------------------------------- snapshot
-    if incluir_snapshot and fonte and _os.path.exists(fonte):
-        for aba, df in snapshot_banco(fonte, rid).items():
+    if incluir_snapshot and abas_fonte:
+        for aba, df in snapshot_banco(abas_fonte, rid).items():
             T[aba] = df
     return T
 
@@ -652,21 +700,23 @@ def _mapa_exigencias_local(cen):
     return dict(req)
 
 
-def snapshot_banco(caminho, run_id):
-    """Copia cada aba do banco de entrada como tabela 'snapshot__<aba>'."""
+def snapshot_banco(abas, run_id):
+    """Congela as abas do input como tabelas 'snapshot__<aba>'.
+
+    `abas` e o dicionario que o Cenario consumiu. Congelar a ENTRADA e o que permite
+    reexecutar a rodada anos depois e obter o mesmo plano: o cadastro muda, o snapshot
+    nao.
+
+    Aba VAZIA vira DataFrame vazio, e nao some: a ausencia da tabela e a presenca dela sem
+    linha dizem coisas diferentes — a primeira e 'nao foi lido', a segunda e 'foi lido e
+    estava vazio'.
+    """
     out = {}
-    try:
-        # `with`: sem fechar, o handle fica aberto e no Windows o arquivo fica TRAVADO —
-        # quem tenta apagar o xlsx temporario depois leva PermissionError (subclasse de
-        # OSError) e o arquivo vaza em silencio.
-        with pd.ExcelFile(caminho) as xl:
-            for aba in xl.sheet_names:
-                nome = "snapshot__" + str(aba).strip().lower().replace(" ", "_").replace("-", "_")
-                df = xl.parse(aba)
-                df.insert(0, "run_id", run_id)
-                out[nome] = df
-    except Exception as e:
-        print(f"  [aviso] nao consegui abrir o banco para snapshot: {e}")
+    for aba, linhas in (abas or {}).items():
+        nome = "snapshot__" + str(aba).strip().lower().replace(" ", "_").replace("-", "_")
+        df = pd.DataFrame(linhas or [])
+        df.insert(0, "run_id", run_id)
+        out[nome] = df
     return out
 
 
@@ -955,17 +1005,6 @@ def comparar_runs(destino, run_ids=None):
             "metas_total", "metas_nao_atingidas", "vp_efeito_base", "auditoria_ok", "milp_status"]
     return metas[[c for c in cols if c in metas.columns]].sort_values("data_hora")
 
-def exportar_excel(tabs, caminho="resultado_otimizacao.xlsx", incluir_snapshot=False,
-                   limite_linhas=200000):
-    """Uma pasta de trabalho com uma aba por tabela — para conferir no Excel."""
-    alvo = {k: v for k, v in tabs.items()
-            if (incluir_snapshot or not k.startswith("snapshot__")) and v is not None and len(v)}
-    with pd.ExcelWriter(caminho, engine="openpyxl") as w:
-        for nome, df in alvo.items():
-            aba = nome.replace("run_", "")[:31]
-            df.head(limite_linhas).to_excel(w, sheet_name=aba, index=False)
-    print(f"{len(alvo)} aba(s) em {caminho}")
-    return caminho
 
 
 def exportar_zip(pasta, caminho="resultado_otimizacao.zip"):

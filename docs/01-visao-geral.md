@@ -36,10 +36,10 @@ Toda a leitura e escrita vive em **adaptadores** ao redor:
                  ┌──────────────────────────────────────────────────┐
    Postgres      │   PACOTE DO OTIMIZADOR  (job no Databricks)      │      Postgres
   input/controle │                                                  │   public.otim_*
-       │         │   carregar_postgres ─▶ MOTOR (PURO) ─▶ qualidade │         ▲
+       │         │   abas_do_postgres ─▶ MOTOR (PURO) ─▶ qualidade │         ▲
        └────────▶│           ▲              │                  │    │─────────┘
                  │      ler_banco      cpsat63 (solver)   persistencia
-                 │      (Excel, dev)        │                  │    │
+                 │     (abas: dict)         │                  │    │
                  └──────────────────────────┼──────────────────┼────┘
                                             └── publicacao ────┘
 ```
@@ -49,12 +49,12 @@ Consequências práticas — é por isso que vale a pena manter:
 1. **A suíte de testes existe.** 114 dos 127 testes rodam sem banco, sem rede e sem credencial,
    em ~2 s (os outros 13 pulam: 12 precisam de Postgres, 1 precisa da suíte legada). Se o
    motor tivesse SQL dentro, nada disso seria testável.
-2. **O caminho Excel continua funcionando.** `ler_banco(<arquivo.xlsx>)` é o caminho de
-   desenvolvimento e das fixtures. O motor não sabe se os dados vieram de Excel ou do
+2. **A porta de entrada é uma só.** `ler_banco(abas)` recebe um dicionário
+   `{aba: [linha, ...]}`. O motor não sabe se os dados vieram de um JSON de fixture ou do
    Postgres — e é isso que garante que o job em produção calcule **exatamente** o mesmo que
    o notebook do analista.
-3. **Trocar a origem dos dados não toca no cálculo.** Ler direto de DataFrames, sem o `.xlsx`
-   temporário, mudaria um adaptador — não o motor.
+3. **Trocar a origem dos dados não toca no cálculo.** Quem lê o Postgres é um adaptador
+   (`abas_do_postgres`); trocar a fonte mexe nele, nunca no motor.
 
 **Regra para o time:** um `import psycopg2`, um `open()` ou um `requests` dentro de
 `otimizador/dominio/` é um bug de arquitetura, mesmo que funcione. Vale para o pacote inteiro
@@ -242,17 +242,16 @@ cidade no ano**. É endógena — depende do próprio plano.
 | Capacidade | Estado |
 |---|---|
 | Modelo de dados do cadastro (`otimizador/infraestrutura/sql/ddl_input.sql`) | com PKs, FKs e tipos |
-| Adaptador Postgres → `Cenario` | materializa um `.xlsx` temporário e chama `ler_banco` |
+| Adaptador Postgres → `Cenario` | lê as tabelas e entrega as abas em memória a `ler_banco` |
 | Portão de qualidade por rodada | 14 checagens críticas |
 | Job de produção (`otimizador/aplicacao/job_databricks.py`) | lê a rodada, resolve, publica e marca o desfecho |
 | Organização em camadas (`dominio`, `aplicacao`, `infraestrutura`, `apresentacao`) | entrada única por `main.py` |
 | Empacotamento em wheel e CI | **não faz parte do pacote** |
 
-**`ler_banco` recebe caminho de arquivo, não DataFrames.** O `.xlsx` temporário tem custo real
-— exige `openpyxl` no cluster, escreve no disco local do driver e perde tipagem no caminho
-Postgres→pandas→Excel. Trocar isso significa mexer na assinatura de `ler_banco`, que é o ponto
-protegido pela retrocompatibilidade do caminho Excel e pelos testes. O caminho de menor risco é
-aditivo: `ler_banco(fonte)` aceitando `dict` **ou** caminho, sem tocar no corpo da função.
+**`ler_banco` recebe as ABAS, não um caminho.** Não há arquivo em lugar nenhum do caminho de
+dados: nem `openpyxl` no cluster, nem escrita no disco do driver, nem a perda de tipagem que o
+trajeto Postgres→pandas→Excel→pandas causava. As fixtures de teste são JSON, e o diff delas é
+legível na revisão.
 
 **Limitações conhecidas:** `input` não tem discriminador de unidade — cada rodada lê o cadastro
 inteiro e filtra depois; o DDL de resultado é aplicado como migração manual; identificadores SQL

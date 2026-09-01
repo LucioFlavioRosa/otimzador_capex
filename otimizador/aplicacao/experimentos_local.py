@@ -1,6 +1,6 @@
 """EXPERIMENTOS LOCAIS — roda o otimizador na sua maquina, sem Databricks e sem Postgres.
 
-O motor e o solver sao Python puro: leem um .xlsx e devolvem o plano. Nada aqui precisa de
+O motor e o solver sao Python puro: recebem as abas e devolvem o plano. Nada aqui precisa de
 cluster, banco ou credencial. E o jeito mais rapido de entender o que o otimizador faz e de
 testar hipoteses ("e se o orcamento cair pela metade?", "quanto a CTS custa em VPL?").
 
@@ -38,11 +38,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 FIXTURES = os.path.join("tests", "fixtures")
 BANCOS = {
-    "cts":      (os.path.join(FIXTURES, "banco_teste_CTS_poc_v2.xlsx"),
+    "cts":      (os.path.join(FIXTURES, "banco_teste_CTS_poc_v2.json"),
                  "2 cidades, 4 sub-bacias, 2 CTS. O default."),
-    "sem-cts":  (os.path.join(FIXTURES, "banco_fixture_testes.xlsx"),
+    "sem-cts":  (os.path.join(FIXTURES, "banco_fixture_testes.json"),
                  "sem CTS, com mix de WACC (parte herda o wacc_medio da unidade)."),
-    "classe":   (os.path.join(FIXTURES, "banco_fixture_classe.xlsx"),
+    "classe":   (os.path.join(FIXTURES, "banco_fixture_classe.json"),
                  "com parcela industrial; c1 mede cobertura em economias, c2 em populacao."),
 }
 
@@ -64,13 +64,20 @@ def _silencioso(verboso):
 
 
 def _carregar(banco, verboso=False, **params):
+    """As abas de um banco de experimento (JSON) -> Cenario.
+
+    O motor recebe ABAS, nao arquivo. Aqui a fonte e um JSON de fixture; em producao e o
+    Postgres (`carregar_postgres.abas_do_postgres`). Duas fontes, a mesma porta."""
+    import json
     M, _, _ = _modulos()
     caminho = banco if os.path.isabs(banco) else os.path.join(ROOT, banco)
     if not os.path.exists(caminho):
         raise SystemExit(f"banco nao encontrado: {caminho}\n"
                          f"  use --listar-bancos para ver os disponiveis")
+    with open(caminho, encoding="utf-8") as f:
+        abas = json.load(f)
     with _silencioso(verboso):
-        return M.ler_banco(caminho, **params)
+        return M.ler_banco(abas, **params)
 
 
 def _resolver(cen, max_time_s, workers, build_all, verboso=False):
@@ -127,12 +134,14 @@ def _rodada(banco, params, max_time_s, workers, build_all, verboso=False):
     cen = _carregar(banco, verboso=verboso, **params)
     res, seg = _resolver(cen, max_time_s, workers, build_all, verboso)
     with _silencioso(verboso):
-        # `arquivo_fonte`: sem ele o snapshot__* nao e gerado (o rotulo `basename` nao
-        # existe no diretorio corrente), e `--salvar` gravaria as run_* sem a copia
-        # congelada do banco de entrada — justamente o que a mensagem promete.
+        # `abas_fonte`: sem ele o snapshot__* nao e gerado, e `--salvar` gravaria as run_*
+        # sem a copia congelada do banco de entrada — justamente o que a mensagem promete.
+        import json
         caminho = banco if os.path.isabs(banco) else os.path.join(ROOT, banco)
+        with open(caminho, encoding="utf-8") as f:
+            abas = json.load(f)
         tabs = P.materializar(cen, res, run_id="experimento_local",
-                              banco=os.path.basename(banco), arquivo_fonte=caminho,
+                              banco=os.path.basename(banco), abas_fonte=abas,
                               params=params)
     return cen, res, tabs, _kpis(res, tabs, seg)
 
@@ -258,7 +267,7 @@ def main(argv=None):
         description="Roda o otimizador localmente, sem Databricks e sem Postgres.",
         formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     ap.add_argument("--banco", default="cts",
-                    help="apelido (cts, sem-cts, classe) ou caminho de um .xlsx")
+                    help="apelido (cts, sem-cts, classe) ou caminho de um .json de abas")
     ap.add_argument("--listar-bancos", action="store_true")
 
     ap.add_argument("--orcamento", type=float, default=20e6,
@@ -290,7 +299,7 @@ def main(argv=None):
         for apelido, (caminho, desc) in BANCOS.items():
             existe = "ok " if os.path.exists(os.path.join(ROOT, caminho)) else "AUSENTE"
             print(f"  [{existe}] {apelido:<10} {caminho}\n             {desc}")
-        print("\nOu passe o caminho de um .xlsx proprio em --banco.\n")
+        print("\nOu passe o caminho de um .json de abas proprio em --banco.\n")
         return 0
 
     banco = BANCOS[a.banco][0] if a.banco in BANCOS else a.banco

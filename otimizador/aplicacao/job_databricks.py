@@ -27,7 +27,6 @@ que precisa de segredo — e ele fica na configuracao do cluster, nao aqui.)
 from __future__ import annotations
 import json
 import os
-import tempfile
 import traceback
 
 
@@ -158,10 +157,9 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
     from otimizador.apresentacao import dashboard_otimizador_v2 as D
     from otimizador.infraestrutura import persistencia as P
     from otimizador.infraestrutura import publicacao as PUB
-    from otimizador.infraestrutura.carregar_postgres import carregar_postgres
+    from otimizador.infraestrutura.carregar_postgres import abas_do_postgres
 
     D.set_engine(M); P.set_engine(M, D)
-    snap = None                          # o `finally` referencia isto mesmo se falhar antes
 
     try:
         # 1) le a run_request ANTES de marcar RODANDO: controle.run_status tem FK para
@@ -173,17 +171,13 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
         # 2) so agora o status existe para ser observado
         PUB.marcar_status_controle(pg_url, run_id, "RODANDO")
 
-        # 3) carga do input (Postgres -> Cenario). O xlsx materializado e MANTIDO: ele e a
-        #    copia congelada do cadastro desta rodada, e vira as tabelas snapshot__* no
-        #    passo 5. Apagado no `finally` la embaixo.
-        #    Nome UNICO (mkstemp), nao `snapshot_{run_id}.xlsx`: duas execucoes do mesmo
-        #    run_id em paralelo — retry disparado enquanto a primeira ainda roda —
-        #    sobrescreveriam ou apagariam o arquivo uma da outra. O `run_id` entra so como
-        #    prefixo legivel, sanitizado porque vai virar nome de arquivo.
-        _rid = "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(run_id))[:40]
-        _fd, snap = tempfile.mkstemp(prefix=f"snapshot_{_rid}_", suffix=".xlsx")
-        os.close(_fd)                    # so o NOME interessa; quem escreve e o adaptador
-        cen = carregar_postgres(pg_url, schema=schema_input, snapshot_para=snap, **kw)
+        # 3) carga do input (Postgres -> Cenario). `abas` fica em memoria e e reusado no
+        #    passo 5 como a copia congelada do cadastro desta rodada (snapshot__*). Nao ha
+        #    arquivo temporario: duas execucoes do mesmo run_id em paralelo — um retry
+        #    disparado enquanto a primeira ainda roda — nao tem como sobrescrever o
+        #    snapshot uma da outra, porque cada uma tem o seu, na propria memoria.
+        abas = abas_do_postgres(pg_url, schema=schema_input)
+        cen = M.ler_banco(abas, **kw)
 
         # 3b) teto de CAPEX tem de existir — depois da carga, para o fallback pela tabela
         #     `input.orcamento` valer. Sem isso o CP-SAT estoura convertendo INF em int.
@@ -199,10 +193,10 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
         #    passar aqui, `materializar` gera um id novo e cada retry PUBLICA DE NOVO em
         #    vez de substituir.
         #    `banco` e o ROTULO da origem (vai para run_meta.banco_arquivo);
-        #    `arquivo_fonte` e de onde saem as tabelas snapshot__* e o banco_md5 — sem ele
-        #    a copia congelada do cadastro nao existe e a auditoria fica sem base.
+        #    `abas_fonte` e de onde saem as tabelas snapshot__* — sem ele a copia congelada
+        #    do cadastro nao existe e a auditoria fica sem base.
         tabs = P.materializar(cen, res, run_id=run_id,
-                              banco=f"postgres://{schema_input}", arquivo_fonte=snap,
+                              banco=f"postgres://{schema_input}", abas_fonte=abas,
                               params=p)
 
         # 6) PORTAO DE QUALIDADE — antes de publicar
@@ -241,16 +235,6 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
         print("ERRO na rodada:\n" + traceback.format_exc())
         raise                                    # `raise` nu preserva o traceback original
 
-    finally:
-        # o snapshot ja foi copiado para dentro de `tabs` (e dai para o blob): o arquivo
-        # temporario nao precisa sobreviver ao job.
-        try:
-            if snap and os.path.exists(snap):
-                os.unlink(snap)
-        except OSError as e:
-            # nao pode derrubar a rodada, mas tambem nao pode sumir: um handle aberto
-            # (ExcelFile sem close) deixa o arquivo travado e o temp do driver enche.
-            print(f"AVISO: nao consegui apagar o snapshot temporario {snap}: {e}")
 
 
 # NOTA para revisao:

@@ -717,42 +717,6 @@ def viavel(cen,plano):
     return True,"ok"
 
 # ---------- solvers
-def ler_excel(path):
-    from openpyxl import load_workbook
-    wb=load_workbook(path,data_only=True)
-    def linhas(aba):
-        if aba not in wb.sheetnames: return []
-        rows=list(wb[aba].iter_rows(values_only=True));hi=0
-        for i,rw in enumerate(rows):
-            if rw and rw[1] is not None and isinstance(rw[0],str) and " " not in str(rw[0]): hi=i;break
-        hdr=[str(h).strip() for h in rows[hi] if h is not None];out=[]
-        for rw in rows[hi+1:]:
-            if rw is None or all(x is None for x in rw): continue
-            out.append(dict(zip(hdr,rw)))
-        return out
-    par={str(d["parametro"]):d["valor"] for d in linhas("Parametros")}
-    anos=int(par.get("anos",20))
-    cids=[Cidade(d["cidade"],d["cobertura_atual"],d["universo"],d["meta_aumento"],d["obras_paralelo"]) for d in linhas("Cidades")]
-    nos=[No(d["no"],d["cidade"],d["sistema"],d["regional"],d["jusante"]) for d in linhas("Nos")]
-    obras=[]
-    for d in linhas("Obras_Coleta"):
-        obras.append(Obra(d["id"],"coleta",no=d["no"],
-            capex_comp={"Ligacao":d.get("capex_ligacao",0),"Rede":d.get("capex_rede",0)},
-            opex_ano=d.get("opex_ano",0),prazo_exec=d.get("prazo_exec",0),obrigatoria=int(d.get("obrigatoria",0) or 0),
-            proibida_ate=d.get("proibida_ate",0),ligacoes=d.get("ligacoes",0),ticket_mes=d.get("ticket_mes",0),
-            preco_ligacao=d.get("preco_ligacao",0),arrec_dir=d.get("arrec_dir",1),arrec_ind=d.get("arrec_ind",1),
-            lag=d.get("lag",1),maturacao=d.get("maturacao",2),wacc=d.get("wacc")))
-    for d in linhas("Obras_Transporte"):
-        obras.append(Obra(d["id"],"transporte",no=d["no"],
-            capex_comp={"Tronco":d.get("capex_tronco",0),"EEE":d.get("capex_eee",0),"LR":d.get("capex_lr",0)},
-            opex_ano=d.get("opex_ano",0),prazo_exec=d.get("prazo_exec",0),obrigatoria=int(d.get("obrigatoria",0) or 0),
-            proibida_ate=d.get("proibida_ate",0),wacc=d.get("wacc")))
-    for d in linhas("Obras_ETE"):
-        obras.append(Obra(d["id"],"ete",sistema=d["sistema"],capex_comp={"ETE":d.get("capex_ete",0)},
-            opex_ano=d.get("opex_ano",0),prazo_exec=d.get("prazo_exec",0),obrigatoria=int(d.get("obrigatoria",0) or 0),
-            proibida_ate=d.get("proibida_ate",0),wacc=d.get("wacc")))
-    orc={d["regional"]:float(d["valor_ano"]) for d in linhas("Orcamento")}
-    return Cenario(nos,cids,obras,orc,anos=anos)
 
 def imprimir(cen,res,titulo="RESULTADO"):
     print(f"\n=== {titulo} ===");print(f"VPL total: R$ {res['vpl']:,.0f}")
@@ -780,95 +744,38 @@ def imprimir(cen,res,titulo="RESULTADO"):
         print(f"  {cid}: +{d['adicionado']:.0f}/{d['meta']:.0f} lig -> {flag}{ex}")
 
 
-def listar_regionais(path):
-    """Regionais disponiveis no banco: [(regional_id, nome, nº de cidades, nº de sub-bacias)]."""
-    from openpyxl import load_workbook
-    wb=load_workbook(path,data_only=True,read_only=True)
-    def _L(*abas):
-        aba=next((a for a in abas if a in wb.sheetnames), None)
-        if aba is None: return []
-        rows=list(wb[aba].iter_rows(values_only=True)); hi=0
-        for i,rw in enumerate(rows):
-            if rw and len([x for x in rw if x is not None])>=2: hi=i;break
-        hdr=[(str(h).strip().lower().replace(" ","_").replace("-","_") if h is not None else None) for h in rows[hi]]
-        return [{k:v for k,v in zip(hdr,rw) if k} for rw in rows[hi+1:] if rw and not all(x is None for x in rw)]
-    reg={d["regional_id"]:(d.get("regional_name") or d["regional_id"]) for d in _L("unidade-regional","unidade_regional")}
-    uni={d["unidade_id"]:d["regional_id"] for d in _L("unidade-regional","unidade_regional")}
-    sup={d["superintendencia_id"]:d["unidade_id"] for d in _L("regional-superintendencia","regional-superintendência")}
-    cid={d["cidade_id"]:d["superintendencia_id"] for d in _L("superintendencia-cidade")}
-    sis={d["sistema_id"]:d["cidade_id"] for d in _L("cidade-sistema")}
-    _etes={d.get("ete_id") for d in _L("ete-capex")}
-    sb={}
-    for d in _L("sistema-topologia"):
-        _c=d.get("componente_sistema_id")
-        if _c is not None and _c not in _etes: sb[_c]=d.get("sistema_id")   # ETE vem da aba ete-capex
-    out={}
-    for _s,_c in sis.items():
-        _r=uni.get(sup.get(cid.get(_c)))
-        if _r is None: continue
-        o=out.setdefault(_r,{"cidades":set(),"sistemas":set(),"sub":0})
-        o["cidades"].add(_c); o["sistemas"].add(_s)
-    for _b,_s in sb.items():
-        _c=sis.get(_s); _r=uni.get(sup.get(cid.get(_c)))
-        if _r in out: out[_r]["sub"]+=1
-    return [(r, reg.get(r,r), len(v["cidades"]), v["sub"]) for r,v in sorted(out.items())]
 
 
-def listar_unidades(path):
-    """Unidades disponiveis: [(unidade_id, unidade_nome, regional_nome, nº cidades, nº sub-bacias)].
-    A UNIDADE e o recorte mais fino de selecao — uma regional pode ter varias."""
-    from openpyxl import load_workbook
-    wb=load_workbook(path,data_only=True,read_only=True)
-    def _L(*abas):
-        aba=next((a for a in abas if a in wb.sheetnames), None)
-        if aba is None: return []
-        rows=list(wb[aba].iter_rows(values_only=True)); hi=0
-        for i,rw in enumerate(rows):
-            if rw and len([x for x in rw if x is not None])>=2: hi=i;break
-        hdr=[(str(h).strip().lower().replace(" ","_").replace("-","_") if h is not None else None) for h in rows[hi]]
-        return [{k:v for k,v in zip(hdr,rw) if k} for rw in rows[hi+1:] if rw and not all(x is None for x in rw)]
-    ur=_L("unidade-regional","unidade_regional")
-    uni_nome={d["unidade_id"]:(d.get("unidade_name") or d["unidade_id"]) for d in ur}
-    uni_reg ={d["unidade_id"]:(d.get("regional_name") or d["regional_id"]) for d in ur}
-    sup={d["superintendencia_id"]:d["unidade_id"] for d in _L("regional-superintendencia","regional-superintendência")}
-    cid={d["cidade_id"]:d["superintendencia_id"] for d in _L("superintendencia-cidade")}
-    sis={d["sistema_id"]:d["cidade_id"] for d in _L("cidade-sistema")}
-    _etes={d.get("ete_id") for d in _L("ete-capex")}
-    sb={}
-    for d in _L("sistema-topologia"):
-        _c=d.get("componente_sistema_id")
-        if _c is not None and _c not in _etes: sb[_c]=d.get("sistema_id")   # ETE vem da aba ete-capex
-    out={}
-    for _c,_sp in cid.items():
-        _u=sup.get(_sp)
-        if _u is None: continue
-        out.setdefault(_u,{"cidades":set(),"sub":0})["cidades"].add(_c)
-    for _b,_s in sb.items():
-        _u=sup.get(cid.get(sis.get(_s)))
-        if _u in out: out[_u]["sub"]+=1
-    return [(u, uni_nome.get(u,u), uni_reg.get(u,""), len(v["cidades"]), v["sub"]) for u,v in sorted(out.items())]
 
 
-def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_faseada=False, metas_cobertura=None, peso_cobertura=0.0, foco_cobertura=None, penalidade_cobertura="meta+cobertura", data_inicio=None, orcamento_total=None, peso_cidade=None, regional=None, unidade=None, curva_adocao="scurve", base_receita="arrecadada", anos_extra_conclusao=3, usar_cts=True, cobertura_so_residencial=False):
-    """Le o banco no formato de JUNCOES (banco_dados_v3): hierarquia em tabelas de ligacao,
-    sistema-topologia (jusante), subbacia-operacional (=sub-bacia), componentes/ete-capex,
-    regional-operacional. Cobertura e CONCESSAO por CIDADE (cidade-operacional + metas-cobertura por cidade). Horizonte do sistema = fim da sua cidade; taxa por REGIONAL."""
-    from openpyxl import load_workbook
+def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_faseada=False, metas_cobertura=None, peso_cobertura=0.0, foco_cobertura=None, penalidade_cobertura="meta+cobertura", data_inicio=None, orcamento_total=None, peso_cidade=None, regional=None, unidade=None, curva_adocao="scurve", base_receita="arrecadada", anos_extra_conclusao=3, usar_cts=True, cobertura_so_residencial=False):
+    """Monta o Cenario a partir das ABAS do input, no formato de JUNCOES: hierarquia em
+    tabelas de ligacao, sistema-topologia (jusante), subbacia-operacional (=sub-bacia),
+    componentes/ete-capex, regional-operacional. Cobertura e CONCESSAO por CIDADE
+    (cidade-operacional + metas-cobertura por cidade). Horizonte do sistema = fim da sua
+    cidade; taxa por REGIONAL.
+
+    `abas` E UM DICIONARIO {nome_da_aba: [linha, ...]}, e cada linha e um dicionario de
+    coluna -> valor, com a coluna ja normalizada (minuscula, `_` no lugar de espaco e
+    hifen). Nao e um caminho de arquivo: o motor nao le planilha.
+
+    Quem monta o dicionario e a FONTE — `carregar_postgres.abas_do_postgres` em producao,
+    `tests/_helpers` a partir dos JSON de fixture. Assim a mesma funcao serve as duas sem
+    que nenhuma delas precise materializar arquivo nenhum.
+    """
     from collections import defaultdict
-    wb=load_workbook(path,data_only=True)
+    if isinstance(abas, (str, bytes)) or hasattr(abas, "__fspath__"):
+        raise TypeError(
+            "ler_banco recebe as ABAS (dict), nao um caminho de arquivo. "
+            "Use carregar_postgres.abas_do_postgres(pg_url) para ler do banco.")
     _BREC = "faturada" if str(base_receita).strip().lower().startswith("fat") else "arrecadada"  # base de receita da rodada
-    def L(*abas):
-        aba=next((a for a in abas if a in wb.sheetnames), None)
-        if aba is None: return []
-        rows=list(wb[aba].iter_rows(values_only=True));hi=0
-        for i,rw in enumerate(rows):
-            if rw and len([x for x in rw if x is not None])>=2: hi=i;break   # cabecalho = 1a linha com >=2 celulas
-        hdr=[(str(h).strip().lower().replace(" ","_").replace("-","_") if h is not None else None) for h in rows[hi]]
-        out=[]
-        for rw in rows[hi+1:]:
-            if rw is None or all(x is None for x in rw): continue
-            out.append({k:v for k,v in zip(hdr,rw) if k})
-        return out
+    def L(*nomes):
+        """A aba pelo primeiro nome que existir — a lista de alternativas cobre a grafia
+        com e sem acento, que difere entre as fontes."""
+        for n in nomes:
+            linhas = abas.get(n)
+            if linhas is not None: return linhas
+        return []
     def num(v,dv=0.0):
         try: return float(v)
         except: return dv
@@ -990,9 +897,17 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     fim_cid={_c:int(num(_d.get("data_fim_concessao"),0)) for _c,_d in cidop.items()}
     _sisop={d["sistema_id"]:d for d in L("sistema-operacional")}                       # compat: fim por sistema (bancos antigos)
     fim_sis={_s:int(num(_d.get("data_fim_concessao"),0)) for _s,_d in _sisop.items()}
-    subop={(d.get("sub_bacia") or d.get("subsistema_id")):d for d in L("subbacia-operacional","subsistema-operacional")}
+    # `dict(d)`, e nao `d`: ADIANTE ESTA FUNCAO ESCREVE nestas linhas — as colunas
+    # `*_novas_obras` sao derivadas por cima do que veio, e no modo sem CTS as colunas
+    # exclusivas recebem o valor consolidado. Sem a copia, quem chamou fica com o dicionario
+    # ALTERADO, e o `abas_fonte` do snapshot publicaria o dado JA DERIVADO como se fosse o
+    # input bruto — a auditoria passaria a mentir sobre a origem.
+    #
+    # Copia RASA e o bastante: os valores sao escalares, e o que nao pode ser compartilhado
+    # e o dicionario da linha.
+    subop={(d.get("sub_bacia") or d.get("subsistema_id")):dict(d) for d in L("subbacia-operacional","subsistema-operacional")}
     # ---- CTS (Coletor de Tempo Seco): estrutura irma da sub-bacia, pareada 1:1 pela aba subbacia-cts ----
-    _cts_op={d.get("cts"): d for d in L("cts-operacional") if d.get("cts")}
+    _cts_op={d.get("cts"): dict(d) for d in L("cts-operacional") if d.get("cts")}   # copia: ver `subop` acima
     _cts_dep={d.get("sub_bacia"): d.get("cts") for d in L("subbacia-cts") if d.get("sub_bacia") and d.get("cts")}
     _cts_ids_all=set(_cts_op)
     # ---- RECORTE DA COBERTURA: total x so residencial -----------------------------

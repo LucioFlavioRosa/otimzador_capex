@@ -212,9 +212,9 @@ A suíte é **autossuficiente**: lê só de `tests/fixtures/`, sem depender dos 
 
 | Fixture | O que tem | Alimenta |
 |---|---|---|
-| `banco_teste_CTS_poc_v2.xlsx` | banco pequeno **com CTS** (2 coletores) | testes de CTS, golden, produção |
-| `banco_fixture_testes.xlsx` | **sem CTS**, com **mix de WACC** (~60% vazios que herdam o `wacc_medio`) | retrocompatibilidade e regra de WACC |
-| `banco_fixture_classe.xlsx` | **parcela industrial** em b1/b3; cidade c1 medindo em economias, c2 em população | classe residencial/industrial e régua de cobertura |
+| `banco_teste_CTS_poc_v2.json` | banco pequeno **com CTS** (2 coletores) | testes de CTS, golden, produção |
+| `banco_fixture_testes.json` | **sem CTS**, com **mix de WACC** (~60% vazios que herdam o `wacc_medio`) | retrocompatibilidade e regra de WACC |
+| `banco_fixture_classe.json` | **parcela industrial** em b1/b3; cidade c1 medindo em economias, c2 em população | classe residencial/industrial e régua de cobertura |
 
 Rodam em qualquer sessão (local, CI, Colab) sem banco externo.
 

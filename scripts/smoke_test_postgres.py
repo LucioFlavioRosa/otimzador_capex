@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import io
 import contextlib
+import json
 import os
 import sys
 import traceback
@@ -49,7 +50,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 SQL = os.path.join("otimizador", "infraestrutura", "sql")
 
-FIXTURE_PADRAO = os.path.join("tests", "fixtures", "banco_teste_CTS_poc_v2.xlsx")
+FIXTURE_PADRAO = os.path.join("tests", "fixtures", "banco_teste_CTS_poc_v2.json")
 RUN_ID = "smoke_0001"
 
 # ORDEM DE CARGA — nao e a ordem do ABAS_INPUT.
@@ -213,30 +214,39 @@ def passo_carga(conn, rel, s_in, fixture):
         rel.falha("carrega o cadastro", f"fixture nao encontrada: {caminho}")
         return False
 
-    xl = pd.ExcelFile(caminho)
+    with open(caminho, encoding="utf-8") as f:
+        abas = json.load(f)
     total, descartadas = 0, []
     try:
         with conn:
             with conn.cursor() as cur:
                 for aba in ORDEM_CARGA:
-                    tabela = C.ABAS_INPUT[aba]
-                    if aba not in xl.sheet_names:
+                    if aba not in abas or not abas[aba]:
                         continue
-                    df = pd.read_excel(caminho, sheet_name=aba)
-                    df.columns = [_norm(c) for c in df.columns]
-                    cols_db = _colunas(conn, s_in, tabela)
-                    fora = [c for c in df.columns if c not in cols_db and not c.startswith("unnamed")]
-                    if fora:
-                        descartadas.append(f"{tabela}:{','.join(fora)}")
-                    usaveis = [c for c in df.columns if c in cols_db]
-                    if not usaveis or df.empty:
-                        continue
-                    d = df[usaveis].astype(object).where(pd.notna(df[usaveis]), None)
-                    execute_values(
-                        cur,
-                        f'INSERT INTO {s_in}."{tabela}" ({", ".join(usaveis)}) VALUES %s',
-                        [tuple(r) for r in d.itertuples(index=False, name=None)])
-                    total += len(d)
+                    # `TABELAS_DE_CARGA`, e nao `ABAS_INPUT`: aquele guarda a CONSULTA de
+                    # leitura, que na hierarquia v8 e uma projecao. Escrever de volta pede
+                    # o nome da tabela, o de-para das colunas e — no caso de
+                    # `superintendencia-cidade` — DUAS tabelas a partir da mesma aba.
+                    for tabela, colunas, renomear in C.TABELAS_DE_CARGA[aba]:
+                        df = pd.DataFrame(abas[aba])
+                        df.columns = [renomear.get(_norm(c), _norm(c)) for c in df.columns]
+                        cols_db = _colunas(conn, s_in, tabela)
+                        if colunas is not None:
+                            # a aba alimenta mais de uma tabela: cada uma leva so o que e dela
+                            df = df[[c for c in df.columns if c in colunas]]
+                            df = df.drop_duplicates()
+                        fora = [c for c in df.columns if c not in cols_db and not c.startswith("unnamed")]
+                        if fora:
+                            descartadas.append(f"{tabela}:{','.join(fora)}")
+                        usaveis = [c for c in df.columns if c in cols_db]
+                        if not usaveis or df.empty:
+                            continue
+                        d = df[usaveis].astype(object).where(pd.notna(df[usaveis]), None)
+                        execute_values(
+                            cur,
+                            f'INSERT INTO {s_in}."{tabela}" ({", ".join(usaveis)}) VALUES %s',
+                            [tuple(r) for r in d.itertuples(index=False, name=None)])
+                        total += len(d)
     except Exception as e:
         rel.falha("carrega o cadastro", f"{type(e).__name__}: {e}")
         print("\n      -> PK ou FK violada costuma significar cadastro duplicado ou orfao.")

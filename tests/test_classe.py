@@ -15,11 +15,9 @@ A invariante mais importante desta suite e a de baixo: o VPL NAO PODE MUDAR. Ela
 que separa esta versao da anterior, e e a que quebraria se alguem voltasse a descontar
 industria fora da cobertura.
 """
-import shutil
 
-import openpyxl
 import pytest
-from _helpers import (BANK_CLASSE, BANK_FIXTURE, build_all, capex_total, engine,
+from _helpers import (BANK_CLASSE, BANK_FIXTURE, banco, build_all, capex_total, engine,
                       load_classe, silent)
 
 
@@ -33,8 +31,8 @@ def test_sem_colunas_residenciais_modos_identicos():
     # sai igual. A engine avisa em voz alta (ALERTA) — o que nao pode e mudar numero
     # em silencio.
     M = engine()
-    a = silent(M.ler_banco, BANK_FIXTURE, unidade="u1", cobertura_so_residencial=False)
-    b = silent(M.ler_banco, BANK_FIXTURE, unidade="u1", cobertura_so_residencial=True)
+    a = silent(M.ler_banco, banco(BANK_FIXTURE), unidade="u1", cobertura_so_residencial=False)
+    b = silent(M.ler_banco, banco(BANK_FIXTURE), unidade="u1", cobertura_so_residencial=True)
     assert set(a.obras) == set(b.obras)
     assert sum(a.vazao.values()) == pytest.approx(sum(b.vazao.values()))
     assert sum(a.max_lig.values()) == pytest.approx(sum(b.max_lig.values()))
@@ -104,19 +102,15 @@ def test_sem_recorte_as_duas_quantidades_sao_iguais():
         assert o.lig_cob == pytest.approx(o.lig)
 
 
-def test_cobertura_em_ligacoes_tambem_cai(tmp_path):
+def test_cobertura_em_ligacoes_tambem_cai():
     # muda c1 para LIGACOES: o recorte nao pode depender da unidade de cobertura.
-    dst = tmp_path / "classe_ligacoes.xlsx"
-    shutil.copy(BANK_CLASSE, dst)
-    wb = openpyxl.load_workbook(dst); ws = wb["cidade-operacional"]
-    h = [c.value for c in ws[1]]; ic = h.index("cidade_id") + 1; iu = h.index("unidade_cobertura") + 1
-    for r in range(2, ws.max_row + 1):
-        if ws.cell(r, ic).value == "c1":
-            ws.cell(r, iu).value = "ligacoes"
-    wb.save(dst)
+    abas = banco(BANK_CLASSE)
+    for linha in abas["cidade-operacional"]:
+        if linha.get("cidade_id") == "c1":
+            linha["unidade_cobertura"] = "ligacoes"
     M = engine()
-    on = silent(M.ler_banco, str(dst), cobertura_so_residencial=False)
-    off = silent(M.ler_banco, str(dst), cobertura_so_residencial=True)
+    on = silent(M.ler_banco, abas, cobertura_so_residencial=False)
+    off = silent(M.ler_banco, abas, cobertura_so_residencial=True)
     c1 = on.nos["b1"].cidade
     assert off.max_lig[c1] < on.max_lig[c1] - 1
     # O universo e AGREGADO POR CIDADE: c1 tem b1 (1000 ligacoes, 800 residenciais) e b2

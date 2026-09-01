@@ -2,23 +2,27 @@
   - *_novas_obras = max(0, universo - atuais);
   - a engine IGNORA o valor do banco e usa o derivado (com aviso na divergencia).
 """
-import shutil
-import openpyxl
+
+
 import pytest
-from _helpers import engine, silent, BANK_CLASSE
+from _helpers import engine, silent, BANK_CLASSE, banco
 
 
-def _subop(path):
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    ws = wb["subbacia-operacional"]; it = ws.iter_rows(values_only=True); h = list(next(it))
-    return {d["sub_bacia"]: d for d in (dict(zip(h, r)) for r in it)}
+def _subop(abas):
+    """A ficha de cada sub-bacia, indexada pelo id — lida da MESMA fonte que o motor.
+
+    Ler de outro lugar tornaria o teste circular ao contrario: ele confere que o motor
+    DERIVA `ligacoes_novas` de universo - atuais, e para isso precisa do numero cru que
+    entrou, nao de uma segunda leitura que pode divergir."""
+    return {d["sub_bacia"]: d for d in abas["subbacia-operacional"]}
 
 
 def test_ligacoes_novas_e_universo_menos_atuais():
     # coleta.lig (ligacoes novas das obras) deve ser universo_ligacoes - ligacoes_atuais
     M = engine()
-    so = _subop(BANK_CLASSE)
-    cen = silent(M.ler_banco, BANK_CLASSE, cobertura_so_residencial=False)
+    abas = banco(BANK_CLASSE)
+    so = _subop(abas)
+    cen = silent(M.ler_banco, abas, cobertura_so_residencial=False)
     checados = 0
     for col in cen.coletas:
         d = so.get(col.no)
@@ -30,16 +34,37 @@ def test_ligacoes_novas_e_universo_menos_atuais():
     assert checados > 0
 
 
-def test_valor_do_banco_e_ignorado(tmp_path):
+def test_valor_do_banco_e_ignorado():
     # zera ligacoes_novas_obras no banco; a engine deve DERIVAR (universo-atuais), nao usar o 0
     M = engine()
-    dst = tmp_path / "novas_zerado.xlsx"
-    shutil.copy(BANK_CLASSE, dst)
-    wb = openpyxl.load_workbook(dst); ws = wb["subbacia-operacional"]
-    h = [c.value for c in ws[1]]; idx = {x: i + 1 for i, x in enumerate(h)}
-    for r in range(2, ws.max_row + 1):
-        ws.cell(r, idx["ligacoes_novas_obras"]).value = 0
-    wb.save(dst)
-    cen = silent(M.ler_banco, str(dst), cobertura_so_residencial=False)
+    abas = banco(BANK_CLASSE)
+    for linha in abas["subbacia-operacional"]:
+        linha["ligacoes_novas_obras"] = 0
+    cen = silent(M.ler_banco, abas, cobertura_so_residencial=False)
     # se a engine tivesse usado o 0 do banco, nenhuma coleta teria ligacoes novas
     assert any(col.lig > 0 for col in cen.coletas), "a engine usou o valor (errado) do banco em vez de derivar"
+
+
+def test_ler_banco_nao_altera_as_abas_que_recebe():
+    """O leitor NAO pode escrever na entrada — e o snapshot de auditoria depende disso.
+
+    `ler_banco` deriva `*_novas_obras` por cima do que veio e, no modo sem CTS, troca as
+    colunas exclusivas pelas consolidadas. Se essas escritas caissem no dicionario do
+    chamador, o `abas_fonte` que o job usa como copia congelada do cadastro publicaria o
+    dado JA DERIVADO como se fosse o input bruto: a rodada continuaria certa, e a
+    auditoria passaria a mentir sobre a origem — sem erro em lugar nenhum.
+
+    Antes o acaso protegia: o snapshot vinha de uma segunda leitura do arquivo. Com a
+    fonte em memoria, os dois passaram a ser o MESMO objeto.
+    """
+    import copy
+    M = engine()
+    abas = banco(BANK_CLASSE)
+    # zera para garantir que a derivacao TEM o que reescrever
+    for linha in abas["subbacia-operacional"]:
+        linha["ligacoes_novas_obras"] = 0
+    antes = copy.deepcopy(abas)
+
+    silent(M.ler_banco, abas, cobertura_so_residencial=False)
+
+    assert abas == antes, "ler_banco alterou as abas recebidas"

@@ -279,15 +279,14 @@ def test_materializar_respeita_o_run_id_da_rodada():
 
 
 # --------------------------------------------- snapshot do cadastro (blob)
-def test_materializar_gera_snapshot_do_arquivo_fonte():
-    """O job rotula a origem como 'postgres://input', que nao existe em disco. Sem
-    `arquivo_fonte`, `os.path.exists(banco)` e falso e a rodada sai SEM snapshot__*:
-    o blob receberia as run_* mas nao a copia congelada do cadastro, e "refazer a mesma
-    rodada meses depois" deixaria de ser possivel."""
+def test_materializar_gera_snapshot_das_abas_fonte():
+    """Sem `abas_fonte` a rodada sai SEM snapshot__*: o blob receberia as run_* mas nao a
+    copia congelada do cadastro, e "refazer a mesma rodada meses depois" deixaria de ser
+    possivel. Com elas, o snapshot existe e o rotulo da origem continua sendo o rotulo."""
     pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
     from otimizador.apresentacao import dashboard_otimizador_v2 as D
     from otimizador.infraestrutura import persistencia as P
-    from _helpers import BANK_CTS, load_cts, build_all, silent
+    from _helpers import BANK_CTS, banco as banco_fixture, load_cts, build_all, silent
     M = engine()
     D.set_engine(M); P.set_engine(M, D)
     cen = load_cts(True)
@@ -298,7 +297,7 @@ def test_materializar_gera_snapshot_do_arquivo_fonte():
     assert sem["run_meta"].iloc[0]["banco_md5"] is None
 
     com = silent(P.materializar, cen, res, run_id="r", banco="postgres://input",
-                 arquivo_fonte=BANK_CTS)
+                 abas_fonte=banco_fixture(BANK_CTS))
     assert len([k for k in com if k.startswith("snapshot__")]) >= 10
     assert com["run_meta"].iloc[0]["banco_md5"]
     # a proveniencia continua sendo o rotulo, nao o caminho do arquivo temporario
@@ -317,13 +316,13 @@ def test_blob_uri_aponta_para_um_caminho_que_existe(tmp_path):
     from otimizador.apresentacao import dashboard_otimizador_v2 as D
     from otimizador.infraestrutura import persistencia as P
     from otimizador.infraestrutura import publicacao as PUB
-    from _helpers import BANK_CTS, load_cts, build_all, silent
+    from _helpers import BANK_CTS, banco as banco_fixture, load_cts, build_all, silent
     M = engine()
     D.set_engine(M); P.set_engine(M, D)
 
     rid = "blob_ptr_1"
     tabs = silent(P.materializar, load_cts(True), build_all(load_cts(True)),
-                  run_id=rid, banco="postgres://input", arquivo_fonte=BANK_CTS)
+                  run_id=rid, banco="postgres://input", abas_fonte=banco_fixture(BANK_CTS))
     silent(PUB.publicar_blob, tabs, str(tmp_path), verbose=False)
 
     uri = PUB.uri_blob(str(tmp_path), rid)
@@ -334,7 +333,7 @@ def test_blob_uri_aponta_para_um_caminho_que_existe(tmp_path):
 
 
 # ------------------------------------------- tabela obrigatoria mas vazia
-def test_tabela_obrigatoria_vazia_e_erro(monkeypatch, tmp_path):
+def test_tabela_obrigatoria_vazia_e_erro(monkeypatch):
     """Tabela VAZIA nao e o mesmo que ausente. Um metas_cobertura existente porem vazio
     (carga interrompida, TRUNCATE indevido) produziria um Cenario sem metas, que resolve,
     passa no portao e publica SUCESSO."""
@@ -350,10 +349,10 @@ def test_tabela_obrigatoria_vazia_e_erro(monkeypatch, tmp_path):
     monkeypatch.setattr(C, "_engine_sqlalchemy", lambda url: _EngineFalsa())
     monkeypatch.setattr(pd, "read_sql", _com_vazia("subbacia_operacional"))
     with pytest.raises(RuntimeError, match="VAZIA"):
-        C.snapshot_input_para_xlsx("postgresql://x", str(tmp_path / "s.xlsx"))
+        C.abas_do_postgres("postgresql://x")
 
 
-def test_tabela_tolerada_vazia_apenas_avisa(monkeypatch, tmp_path, capsys):
+def test_tabela_tolerada_vazia_apenas_avisa(monkeypatch, capsys):
     """`fator_esgoto` vazio e legitimo: o motor cai em paridade 1.0 quando a cidade nao tem
     faixas (otimizador_capex_v62.py:365). Barrar aqui impediria uma rodada valida — mas
     passar em silencio esconderia uma carga interrompida. Entao: avisa."""
@@ -366,7 +365,7 @@ def test_tabela_tolerada_vazia_apenas_avisa(monkeypatch, tmp_path, capsys):
 
     monkeypatch.setattr(C, "_engine_sqlalchemy", lambda url: _EngineFalsa())
     monkeypatch.setattr(pd, "read_sql", read_sql_falso)
-    C.snapshot_input_para_xlsx("postgresql://x", str(tmp_path / "s.xlsx"))
+    C.abas_do_postgres("postgresql://x")
     assert "VAZIA" in capsys.readouterr().out
 
 
@@ -409,8 +408,7 @@ def job_dublado(monkeypatch):
     # rodar() chama o solver de verdade (CP.resolver_por_sistema): sem OR-Tools estes 4
     # testes FALHARIAM em vez de pular — quebrando o invariante "nenhum skip em vermelho".
     pytest.importorskip("ortools", reason="rodar() usa o CP-SAT; OR-Tools ausente")
-    from _helpers import BANK_CTS, silent
-    M = engine()
+    from _helpers import BANK_CTS, banco as banco_fixture
 
     espiao = _EspiaoPublicacao()
     monkeypatch.setattr(J, "_ler_run_request",
@@ -419,21 +417,19 @@ def job_dublado(monkeypatch):
 
     vistos = {}
 
-    def carregar_falso(pg_url, schema="input", snapshot_para=None, **params):
-        # o adaptador real materializa o cadastro num xlsx; aqui copiamos a fixture para o
-        # caminho pedido, que e exatamente o contrato de `snapshot_para`
-        vistos["snapshot_para"] = snapshot_para
-        if snapshot_para:
-            import shutil
-            shutil.copy(BANK_CTS, snapshot_para)
-        return silent(M.ler_banco, BANK_CTS, **params)
+    def abas_falsas(pg_url, schema="input", **kw):
+        # o adaptador real le o Postgres; aqui a fixture faz as vezes das abas lidas
+        vistos["schema"] = schema
+        abas = banco_fixture(BANK_CTS)
+        vistos["abas"] = abas
+        return abas
 
     import sys as _sys
     import otimizador.infraestrutura as _infra
     monkeypatch.setattr(_infra, "publicacao", espiao)
     monkeypatch.setitem(_sys.modules, "otimizador.infraestrutura.publicacao", espiao)
-    monkeypatch.setattr("otimizador.infraestrutura.carregar_postgres.carregar_postgres",
-                        carregar_falso)
+    monkeypatch.setattr("otimizador.infraestrutura.carregar_postgres.abas_do_postgres",
+                        abas_falsas)
     return espiao, vistos
 
 
@@ -447,25 +443,20 @@ def test_rodar_fim_a_fim_publica_e_marca_status(job_dublado, capsys):
 
 
 def test_rodar_passa_o_snapshot_para_a_materializacao(job_dublado):
-    """O bug que escapou: sem `arquivo_fonte=snap`, a rodada publica sem snapshot__* e a
-    camada de reproducao fica vazia — sem nenhum erro."""
+    """O bug que escapou: sem `abas_fonte`, a rodada publica sem snapshot__* e a camada de
+    reproducao fica vazia — sem nenhum erro."""
     espiao, vistos = job_dublado
     J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
 
-    assert vistos["snapshot_para"], "carregar_postgres tem de receber snapshot_para"
+    assert vistos["abas"], "o job tem de ler as abas do Postgres"
     tabs, _ = espiao.publicado
     snaps = [k for k in tabs if k.startswith("snapshot__")]
     assert len(snaps) >= 10, f"rodada publicada sem copia congelada do cadastro: {snaps}"
     assert tabs["run_meta"].iloc[0]["banco_md5"], "sem md5 nao da para auditar a origem"
-    # a proveniencia continua sendo o rotulo, nao o arquivo temporario
+    # a proveniencia continua sendo o rotulo da origem
     assert tabs["run_meta"].iloc[0]["banco_arquivo"].startswith("postgres://")
 
 
-def test_rodar_apaga_o_snapshot_temporario(job_dublado):
-    import os
-    espiao, vistos = job_dublado
-    J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
-    assert not os.path.exists(vistos["snapshot_para"]), "o xlsx temporario ficou orfao"
 
 
 def test_rodar_repassa_blob_e_criar_schema_false(job_dublado):
@@ -492,13 +483,11 @@ def test_rodar_falhou_qualidade_nao_publica(job_dublado, monkeypatch):
     assert espiao.publicado is None, "reprovou no portao e mesmo assim publicou"
     assert espiao.status == ["RODANDO", "FALHOU_QUALIDADE"]
     assert espiao.diagnostico, "o relatorio tem de ficar gravado para o operador ler"
-    import os
-    assert not os.path.exists(vistos["snapshot_para"]), "o temporario vazou neste ramo"
 
 
 def test_rodar_erro_marca_status_e_relevanta(job_dublado, monkeypatch):
-    """Falha tecnica depois da carga: marca ERRO, re-levanta (para o run aparecer como
-    falho no Databricks) e ainda assim limpa o temporario."""
+    """Falha tecnica depois da carga: marca ERRO e re-levanta, para o run aparecer como
+    falho no Databricks em vez de sumir."""
     espiao, vistos = job_dublado
 
     def explode(*a, **k):
@@ -510,18 +499,9 @@ def test_rodar_erro_marca_status_e_relevanta(job_dublado, monkeypatch):
 
     assert espiao.publicado is None
     assert espiao.status == ["RODANDO", "ERRO"]
-    import os
-    assert not os.path.exists(vistos["snapshot_para"]), "o temporario vazou no ramo de erro"
 
 
-def test_rodar_usa_nome_unico_para_o_snapshot(job_dublado):
-    """Duas execucoes do mesmo run_id nao podem disputar o mesmo arquivo temporario."""
-    espiao, vistos = job_dublado
-    J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
-    primeiro = vistos["snapshot_para"]
-    J.rodar("run_teste", "postgresql://dublê", max_time_s=20)
-    assert vistos["snapshot_para"] != primeiro, "nome do snapshot nao e unico por execucao"
-    assert "run_teste" in vistos["snapshot_para"], "o run_id some do nome e atrapalha o diagnostico"
+
 
 
 # ------------------------------------------- idempotencia da copia em blob
@@ -867,3 +847,25 @@ def test_spark_antigo_sem_a_api_cai_para_criacao(monkeypatch):
 
     (esc,) = estado["escritas"]
     assert esc["mode"] == "append" and "replaceWhere" not in esc["options"]
+
+
+# ------------------------------------------------- estabilidade do banco_md5
+def test_banco_md5_nao_muda_com_a_ordem_nem_com_o_tipo():
+    """O hash responde "o cadastro mudou?", e nao "a leitura veio diferente?".
+
+    As consultas de `abas_do_postgres` sao `SELECT` sem `ORDER BY`: o Postgres pode
+    devolver o mesmo conjunto em outra ordem entre duas execucoes. E `Decimal("1.0")`,
+    `1.0` e `1` sao o mesmo numero em drivers diferentes. Se qualquer um dos dois mexesse
+    no hash, a auditoria acusaria uma troca de banco que nunca houve.
+    """
+    from decimal import Decimal
+    from otimizador.infraestrutura.persistencia import _md5
+
+    base = {"a": [{"x": 1, "y": None}, {"x": 2, "y": "z"}]}
+    outra_ordem = {"a": [{"y": "z", "x": 2}, {"y": None, "x": 1}]}
+    outro_tipo = {"a": [{"x": Decimal("1.0"), "y": None}, {"x": 2.0, "y": "z"}]}
+
+    assert _md5(base) == _md5(outra_ordem)
+    assert _md5(base) == _md5(outro_tipo)
+    # e o que E mudanca de dado continua aparecendo
+    assert _md5(base) != _md5({"a": [{"x": 9, "y": None}, {"x": 2, "y": "z"}]})

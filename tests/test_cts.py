@@ -123,33 +123,22 @@ def test_banco_sem_cts_modos_sao_identicos():
 # Com as colunas consolidadas, a igualdade deixa de valer POR CONSTRUCAO: sem o coletor,
 # a parte da area que so ele alcancava nao e atendida por ninguem. O que se conserva e
 # outra coisa — cada cenario conta a sobreposicao uma vez.
-import shutil
 
-import openpyxl
-from _helpers import BANK_CTS, silent
+from _helpers import BANK_CTS, banco, silent
 
 
-def _com_consolidado(tmp_path, por_sub):
-    """Copia o banco de CTS e grava as colunas `*_com_cts` de `{sub: {coluna: valor}}`."""
-    dst = tmp_path / "cts_consolidado.xlsx"
-    shutil.copy(BANK_CTS, dst)
-    wb = openpyxl.load_workbook(dst)
-    ws = wb["subbacia-operacional"]
-    cab = [str(c.value).strip() for c in ws[1]]
-    ichave = cab.index("sub_bacia") + 1
-    for sub, valores in por_sub.items():
-        for col, val in valores.items():
-            if col in cab:
-                icol = cab.index(col) + 1
-            else:
-                icol = ws.max_column + 1
-                ws.cell(1, icol).value = col
-                cab.append(col)
-            for r in range(2, ws.max_row + 1):
-                if ws.cell(r, ichave).value == sub:
-                    ws.cell(r, icol).value = val
-    wb.save(dst)
-    return str(dst)
+def _com_consolidado(por_sub):
+    """As abas do banco de CTS com as colunas `*_com_cts` de `{sub: {coluna: valor}}`.
+
+    So a sub-bacia nomeada recebe a coluna. As outras ficam SEM ela, e e de proposito: e
+    assim que o banco real chega enquanto a carga nao preenche todas — o motor tem de
+    saber cair na coluna exclusiva quando a consolidada falta."""
+    abas = banco(BANK_CTS)
+    for linha in abas["subbacia-operacional"]:
+        valores = por_sub.get(linha.get("sub_bacia"))
+        if valores:
+            linha.update(valores)
+    return abas
 
 
 #: b1 atende 1.200 sem o coletor (1.000 exclusivas + 200 de sobreposicao); b4 atende 1.350.
@@ -161,11 +150,11 @@ CONSOLIDADO = {
 }
 
 
-def test_sem_cts_le_a_coluna_consolidada_em_vez_de_somar(tmp_path):
+def test_sem_cts_le_a_coluna_consolidada_em_vez_de_somar():
     # b1 tem 1000 ligacoes exclusivas e a cts1 tem 500. A soma daria 1500 — e conta a
     # area sobreposta duas vezes. A coluna diz que a sub-bacia, sem o coletor, atende
     # 1200: as 1000 dela mais 200 de sobreposicao.
-    arq = _com_consolidado(tmp_path, CONSOLIDADO)
+    arq = _com_consolidado(CONSOLIDADO)
     M = engine()
     off = silent(M.ler_banco, arq, usar_cts=False)
     cid = off.nos["b1"].cidade
@@ -176,7 +165,7 @@ def test_sem_cts_le_a_coluna_consolidada_em_vez_de_somar(tmp_path):
     assert off.max_lig[cid] == pytest.approx(2100.0)
 
 
-def test_a_area_so_do_coletor_nao_e_atendida_sem_ele(tmp_path):
+def test_a_area_so_do_coletor_nao_e_atendida_sem_ele():
     # Com as duas sub-bacias pareadas informando o consolidado, o cenario fica limpo:
     #
     #   ON   b1 1000 + b2 900 + cts1 500x1,2 = 2500  |  b3 800 + b4 1200 + cts2 400x1,5 = 2600
@@ -184,7 +173,7 @@ def test_a_area_so_do_coletor_nao_e_atendida_sem_ele(tmp_path):
     #
     # A diferenca (850) e a area que so os coletores alcancavam, com o potencial deles —
     # e nenhum dos dois existe sem eles.
-    arq = _com_consolidado(tmp_path, CONSOLIDADO)
+    arq = _com_consolidado(CONSOLIDADO)
     M = engine()
     on = silent(M.ler_banco, arq, usar_cts=True)
     off = silent(M.ler_banco, arq, usar_cts=False)
@@ -201,18 +190,18 @@ def test_sem_a_coluna_usa_a_exclusiva_e_ALERTA(capsys):
     ALERTA diz exatamente isso: e um numero a menos, nao um numero errado em silencio.
     """
     M = engine()
-    off = M.ler_banco(BANK_CTS, usar_cts=False)
+    off = M.ler_banco(banco(BANK_CTS), usar_cts=False)
     saida = capsys.readouterr().out
     assert "usou o universo EXCLUSIVO" in saida
     cid = off.nos["b1"].cidade
     assert off.max_lig[cid] == pytest.approx(1900.0)   # 1000 (b1) + 900 (b2), so as sub-bacias
 
 
-def test_com_cts_ligada_a_coluna_consolidada_e_ignorada(tmp_path):
+def test_com_cts_ligada_a_coluna_consolidada_e_ignorada():
     # Ela so descreve o cenario SEM coletor. Com ele, a sub-bacia usa o que e exclusivo
     # dela e a CTS entra como no proprio — a sobreposicao esta nos numeros da CTS.
-    arq = _com_consolidado(tmp_path, CONSOLIDADO)
+    arq = _com_consolidado(CONSOLIDADO)
     M = engine()
     on_com = silent(M.ler_banco, arq, usar_cts=True)
-    on_sem = silent(M.ler_banco, BANK_CTS, usar_cts=True)
+    on_sem = silent(M.ler_banco, banco(BANK_CTS), usar_cts=True)
     assert sum(on_com.max_lig.values()) == pytest.approx(sum(on_sem.max_lig.values()))

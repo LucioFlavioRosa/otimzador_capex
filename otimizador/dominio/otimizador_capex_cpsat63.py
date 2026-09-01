@@ -244,7 +244,7 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
     return res
 
 if __name__=="__main__":
-    cen=M.ler_banco("banco_dados_v16.xlsx", orcamento=2_000_000, horizonte_capex=5)
+    cen=M.ler_banco(abas, orcamento=2_000_000, horizonte_capex=5)   # abas: dict do Postgres/JSON
     res=resolver_cpsat(cen, max_time_s=30)
     M.imprimir(cen,res,f"PLANO CP-SAT ({res['milp_status']})")
     print("bound:",res["milp_bound"])

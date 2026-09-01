@@ -1,0 +1,542 @@
+{
+ "unidade-regional": [
+  {
+   "regional_id": "r1",
+   "regional_name": "Regional Teste",
+   "unidade_id": "u1",
+   "unidade_name": "Unidade Teste",
+   "wacc_medio": 0.09
+  }
+ ],
+ "regional-superintendencia": [
+  {
+   "unidade_id": "u1",
+   "superintendencia_id": "sup1",
+   "superintendencia_name": "Superintendencia Teste"
+  }
+ ],
+ "superintendencia-cidade": [
+  {
+   "superintendencia_id": "sup1",
+   "cidade_id": "c1",
+   "cidade_name": "Cidade A"
+  },
+  {
+   "superintendencia_id": "sup1",
+   "cidade_id": "c2",
+   "cidade_name": "Cidade B"
+  }
+ ],
+ "cidade-sistema": [
+  {
+   "cidade_id": "c1",
+   "sistema_id": "s1",
+   "sistema_name": "Sistema A"
+  },
+  {
+   "cidade_id": "c2",
+   "sistema_id": "s2",
+   "sistema_name": "Sistema B"
+  }
+ ],
+ "sistema-topologia": [
+  {
+   "sistema_id": "s1",
+   "componente_sistema_id": "b1",
+   "componente_sistema_nome": "sub-bacia b1",
+   "componente_sistema_id_jusante": "e1"
+  },
+  {
+   "sistema_id": "s1",
+   "componente_sistema_id": "b2",
+   "componente_sistema_nome": "sub-bacia b2",
+   "componente_sistema_id_jusante": "e1"
+  },
+  {
+   "sistema_id": "s2",
+   "componente_sistema_id": "b3",
+   "componente_sistema_nome": "sub-bacia b3",
+   "componente_sistema_id_jusante": "e2"
+  },
+  {
+   "sistema_id": "s2",
+   "componente_sistema_id": "b4",
+   "componente_sistema_nome": "sub-bacia b4",
+   "componente_sistema_id_jusante": "e2"
+  }
+ ],
+ "cidade-operacional": [
+  {
+   "cidade_id": "c1",
+   "data_fim_concessao": 2045,
+   "unidade_cobertura": "ligacoes"
+  },
+  {
+   "cidade_id": "c2",
+   "data_fim_concessao": 2045,
+   "unidade_cobertura": "ligacoes"
+  }
+ ],
+ "subbacia-operacional": [
+  {
+   "sub_bacia": "b1",
+   "preco_por_ligacao": 800,
+   "receita_faturada_media_mensal": 200000,
+   "receita_arrecadada_media_mensal": 180000,
+   "tempo_arrecadacao": 6,
+   "tempo_ramp_up": 12,
+   "vazao_contribuicao": 100,
+   "universo_ligacoes": 1000,
+   "ligacoes_atuais": 400,
+   "ligacoes_novas_obras": 600,
+   "universo_economias": 1100,
+   "economias_atuais": 440,
+   "economias_novas_obras": 660,
+   "universo_populacao": 3000,
+   "populacao_atual": 1200,
+   "populacao_novas_obras": 1800,
+   "potencial_crescimento": 1
+  },
+  {
+   "sub_bacia": "b2",
+   "preco_por_ligacao": 800,
+   "receita_faturada_media_mensal": 150000,
+   "receita_arrecadada_media_mensal": 135000,
+   "tempo_arrecadacao": 6,
+   "tempo_ramp_up": 12,
+   "vazao_contribuicao": 80,
+   "universo_ligacoes": 900,
+   "ligacoes_atuais": 300,
+   "ligacoes_novas_obras": 600,
+   "universo_economias": 990,
+   "economias_atuais": 330,
+   "economias_novas_obras": 660,
+   "universo_populacao": 2700,
+   "populacao_atual": 900,
+   "populacao_novas_obras": 1800,
+   "potencial_crescimento": 1
+  },
+  {
+   "sub_bacia": "b3",
+   "preco_por_ligacao": 800,
+   "receita_faturada_media_mensal": 120000,
+   "receita_arrecadada_media_mensal": 108000,
+   "tempo_arrecadacao": 6,
+   "tempo_ramp_up": 12,
+   "vazao_contribuicao": 70,
+   "universo_ligacoes": 800,
+   "ligacoes_atuais": 350,
+   "ligacoes_novas_obras": 450,
+   "universo_economias": 880,
+   "economias_atuais": 385,
+   "economias_novas_obras": 495,
+   "universo_populacao": 2400,
+   "populacao_atual": 1050,
+   "populacao_novas_obras": 1350,
+   "potencial_crescimento": 1
+  },
+  {
+   "sub_bacia": "b4",
+   "preco_por_ligacao": 800,
+   "receita_faturada_media_mensal": 160000,
+   "receita_arrecadada_media_mensal": 144000,
+   "tempo_arrecadacao": 6,
+   "tempo_ramp_up": 12,
+   "vazao_contribuicao": 90,
+   "universo_ligacoes": 1200,
+   "ligacoes_atuais": 500,
+   "ligacoes_novas_obras": 700,
+   "universo_economias": 1320,
+   "economias_atuais": 550,
+   "economias_novas_obras": 770,
+   "universo_populacao": 3600,
+   "populacao_atual": 1500,
+   "populacao_novas_obras": 2100,
+   "potencial_crescimento": 1
+  }
+ ],
+ "componentes-subbacias-capex": [
+  {
+   "sub_bacia": "b1",
+   "componente": "Ligacao de esgoto",
+   "quantidade": 600,
+   "unidade": "ligacao",
+   "preco_unitario": 500,
+   "capex": 300000,
+   "opex": 6000,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b1",
+   "componente": "Rede coletora",
+   "quantidade": 1200,
+   "unidade": "m",
+   "preco_unitario": 400,
+   "capex": 480000,
+   "opex": 4800,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 12,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b1",
+   "componente": "Tronco",
+   "quantidade": 600,
+   "unidade": "m",
+   "preco_unitario": 450,
+   "capex": 270000,
+   "opex": 3600,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 12,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b1",
+   "componente": "EEE",
+   "quantidade": 1,
+   "unidade": "un",
+   "preco_unitario": 180000,
+   "capex": 180000,
+   "opex": 3000,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b1",
+   "componente": "Linha de recalque",
+   "quantidade": 600,
+   "unidade": "m",
+   "preco_unitario": 350,
+   "capex": 210000,
+   "opex": 2400,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b2",
+   "componente": "Ligacao de esgoto",
+   "quantidade": 600,
+   "unidade": "ligacao",
+   "preco_unitario": 500,
+   "capex": 300000,
+   "opex": 6000,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b2",
+   "componente": "Rede coletora",
+   "quantidade": 1200,
+   "unidade": "m",
+   "preco_unitario": 400,
+   "capex": 480000,
+   "opex": 4800,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 12,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": 0.105
+  },
+  {
+   "sub_bacia": "b2",
+   "componente": "Tronco",
+   "quantidade": 600,
+   "unidade": "m",
+   "preco_unitario": 450,
+   "capex": 270000,
+   "opex": 3600,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 12,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": 0.105
+  },
+  {
+   "sub_bacia": "b2",
+   "componente": "EEE",
+   "quantidade": 1,
+   "unidade": "un",
+   "preco_unitario": 180000,
+   "capex": 180000,
+   "opex": 3000,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": 0.105
+  },
+  {
+   "sub_bacia": "b2",
+   "componente": "Linha de recalque",
+   "quantidade": 600,
+   "unidade": "m",
+   "preco_unitario": 350,
+   "capex": 210000,
+   "opex": 2400,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": 0.105
+  },
+  {
+   "sub_bacia": "b3",
+   "componente": "Ligacao de esgoto",
+   "quantidade": 450,
+   "unidade": "ligacao",
+   "preco_unitario": 500,
+   "capex": 225000,
+   "opex": 4500,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b3",
+   "componente": "Rede coletora",
+   "quantidade": 900,
+   "unidade": "m",
+   "preco_unitario": 400,
+   "capex": 360000,
+   "opex": 3600,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 12,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b3",
+   "componente": "Tronco",
+   "quantidade": 450,
+   "unidade": "m",
+   "preco_unitario": 450,
+   "capex": 202500,
+   "opex": 2700,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 12,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b3",
+   "componente": "EEE",
+   "quantidade": 1,
+   "unidade": "un",
+   "preco_unitario": 135000,
+   "capex": 135000,
+   "opex": 2250,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b3",
+   "componente": "Linha de recalque",
+   "quantidade": 450,
+   "unidade": "m",
+   "preco_unitario": 350,
+   "capex": 157500,
+   "opex": 1800,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b4",
+   "componente": "Ligacao de esgoto",
+   "quantidade": 700,
+   "unidade": "ligacao",
+   "preco_unitario": 500,
+   "capex": 350000,
+   "opex": 7000,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": null
+  },
+  {
+   "sub_bacia": "b4",
+   "componente": "Rede coletora",
+   "quantidade": 1400,
+   "unidade": "m",
+   "preco_unitario": 400,
+   "capex": 560000,
+   "opex": 5600,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 12,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": 0.105
+  },
+  {
+   "sub_bacia": "b4",
+   "componente": "Tronco",
+   "quantidade": 700,
+   "unidade": "m",
+   "preco_unitario": 450,
+   "capex": 315000,
+   "opex": 4200,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 12,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": 0.105
+  },
+  {
+   "sub_bacia": "b4",
+   "componente": "EEE",
+   "quantidade": 1,
+   "unidade": "un",
+   "preco_unitario": 210000,
+   "capex": 210000,
+   "opex": 3500,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": 0.105
+  },
+  {
+   "sub_bacia": "b4",
+   "componente": "Linha de recalque",
+   "quantidade": 700,
+   "unidade": "m",
+   "preco_unitario": 350,
+   "capex": 245000,
+   "opex": 2800,
+   "tempo_predecessoras": 0,
+   "tempo_execucao": 10,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": 0.105
+  }
+ ],
+ "ete-capex": [
+  {
+   "ete_id": "e1",
+   "capacidade_por_modulo": 150,
+   "capex_por_modulo": 500000,
+   "opex_por_modulo": 60000,
+   "tempo_predecessoras": 0,
+   "tempo_de_execucao": 12,
+   "capacidade_nominal_atual": 0,
+   "vazao_de_operacao_atual": 0,
+   "capacidade_ociosa": 0,
+   "nova": "Sim",
+   "capex_terreno": 300000,
+   "modulos": 3,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": 0.09
+  },
+  {
+   "ete_id": "e2",
+   "capacidade_por_modulo": 150,
+   "capex_por_modulo": 500000,
+   "opex_por_modulo": 60000,
+   "tempo_predecessoras": 0,
+   "tempo_de_execucao": 12,
+   "capacidade_nominal_atual": 0,
+   "vazao_de_operacao_atual": 0,
+   "capacidade_ociosa": 0,
+   "nova": "Sim",
+   "capex_terreno": 300000,
+   "modulos": 3,
+   "obra_obrigatoria_ano": 0,
+   "obra_proibida_ate": 0,
+   "wacc": 0.09
+  }
+ ],
+ "regional-operacional": [
+  {
+   "regional_id": "r1",
+   "ano_base": 2026
+  }
+ ],
+ "metas-cobertura": [
+  {
+   "cidade_id": "c1",
+   "ano": 2030,
+   "cobertura_pct": 60
+  },
+  {
+   "cidade_id": "c1",
+   "ano": 2040,
+   "cobertura_pct": 85
+  },
+  {
+   "cidade_id": "c2",
+   "ano": 2030,
+   "cobertura_pct": 55
+  },
+  {
+   "cidade_id": "c2",
+   "ano": 2040,
+   "cobertura_pct": 80
+  }
+ ],
+ "fator-esgoto": [
+  {
+   "cidade_id": "c1",
+   "cidade_name": "Cidade A",
+   "cobertura_pct": 0,
+   "paridade": 0.8
+  },
+  {
+   "cidade_id": "c1",
+   "cidade_name": "Cidade A",
+   "cobertura_pct": 60,
+   "paridade": 0.9
+  },
+  {
+   "cidade_id": "c1",
+   "cidade_name": "Cidade A",
+   "cobertura_pct": 85,
+   "paridade": 1
+  },
+  {
+   "cidade_id": "c2",
+   "cidade_name": "Cidade B",
+   "cobertura_pct": 0,
+   "paridade": 0.8
+  },
+  {
+   "cidade_id": "c2",
+   "cidade_name": "Cidade B",
+   "cobertura_pct": 55,
+   "paridade": 0.9
+  },
+  {
+   "cidade_id": "c2",
+   "cidade_name": "Cidade B",
+   "cobertura_pct": 80,
+   "paridade": 1
+  }
+ ]
+}
