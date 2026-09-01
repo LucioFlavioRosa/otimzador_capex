@@ -23,7 +23,7 @@ CREATE SCHEMA IF NOT EXISTS controle;
 
 -- ---- HIERARQUIA -----------------------------------------------------------
 -- aba do motor: unidade-regional
--- `usa_sistema_cts` e da REGIONAL, e nao do Databricks: marcado, CADA sistema da
+-- `usa_macrorregiao_cts` e da REGIONAL, e nao do Databricks: marcado, CADA sistema da
 -- unidade aceita UMA CTS; desmarcado, aceitam varias. Regra de cadastro — o
 -- motor ignora, porque para ele uma ou duas CTS sao nos como quaisquer outros.
 --
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS input.unidade_regional (
     regional_id     text NOT NULL,
     regional_name   text,
     wacc_medio      double precision,
-    usa_sistema_cts boolean NOT NULL DEFAULT false
+    usa_macrorregiao_cts boolean NOT NULL DEFAULT false
 );
 
 -- HIERARQUIA v8: a EMPRESA OPERADORA no lugar da superintendencia.
