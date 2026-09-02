@@ -748,7 +748,7 @@ def imprimir(cen,res,titulo="RESULTADO"):
 
 
 
-def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_faseada=False, metas_cobertura=None, peso_cobertura=0.0, foco_cobertura=None, penalidade_cobertura="meta+cobertura", data_inicio=None, orcamento_total=None, peso_cidade=None, regional=None, unidade=None, curva_adocao="scurve", base_receita="arrecadada", anos_extra_conclusao=3, usar_cts=True, cobertura_so_residencial=False):
+def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_faseada=False, metas_cobertura=None, peso_cobertura=0.0, foco_cobertura=None, penalidade_cobertura="meta+cobertura", data_inicio=None, orcamento_total=None, peso_cidade=None, regional=None, unidade=None, curva_adocao="scurve", base_receita="arrecadada", anos_extra_conclusao=3, usar_cts=True, cobertura_so_residencial=False, unidade_cobertura="ligacoes"):
     """Monta o Cenario a partir das ABAS do input, no formato de JUNCOES: hierarquia em
     tabelas de ligacao, sistema-topologia (jusante), subbacia-operacional (=sub-bacia),
     componentes/ete-capex, regional-operacional. Cobertura e CONCESSAO por CIDADE
@@ -964,8 +964,9 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         """
         if not _cob_res: return False
         if (subop.get(_sbk) or {}).get(_COB_LIG[0]) in (None,""): return False
-        _u=str((cidop.get(sis_cid.get(sis_de_sb.get(_sbk))) or {}).get("unidade_cobertura") or "ligacoes")
-        return not _u.strip().lower().startswith("pop")
+        # A REGUA VEM DO PARAMETRO DA RODADA, e nao mais da cidade: ela e uma so
+        # para a unidade inteira, entao esta pergunta nao depende da sub-bacia.
+        return not str(unidade_cobertura or "ligacoes").strip().lower().startswith("pop")
     # ---- CTS DESLIGADA: o que a sub-bacia absorve ---------------------------------
     # As colunas de LIGACAO e ECONOMIA da sub-bacia sao o que pertence EXCLUSIVAMENTE a
     # ela. A CTS cobre uma area que se SOBREPOE a essa — e a sobreposicao e contada uma
@@ -1319,12 +1320,29 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     cen.orc_janela_total={_rg:sum(cen.orc[_rg][:int(cen.anos_capex)]) for _rg in cen.regionais}  # sobra acumulada da janela custeia o rabo
     cen.ete_fixo=bool(ete_fixo); cen.ete_faseada=bool(ete_faseada)
     # --- COBERTURA (ligacoes TRATADAS) por SISTEMA: total possivel e base atual ---
-    # --- UNIDADE DE COBERTURA por CIDADE (coluna 'unidade_cobertura' em cidade-operacional):
-    #     ligacoes (default) | economias | populacao. Converte universo/base/incrementos por densidade.
-    _unid={}
-    for _c,_d in cidop.items():
-        _u=str(_d.get("unidade_cobertura") or "ligacoes").strip().lower()
-        _unid[cid_name.get(_c,_c)]=("economias" if _u.startswith("econ") else ("populacao" if _u.startswith("pop") else "ligacoes"))
+    # --- UNIDADE DE COBERTURA: PARAMETRO DA RODADA, e nao mais coluna do cadastro.
+    #
+    #     ligacoes (default) | economias | populacao. Converte universo/base/incrementos
+    #     por densidade.
+    #
+    #     ERA `cidade_operacional.unidade_cobertura`, uma regua por CIDADE. Nao e dado
+    #     de cadastro: e a lente com que se OLHA o mesmo cadastro, e por isso mudou de
+    #     lugar. Vale para a unidade inteira — comparar dois planos da mesma unidade
+    #     medidos em reguas diferentes por cidade nao respondia pergunta nenhuma.
+    #
+    #     O DICIONARIO POR CIDADE FICA, com o mesmo valor em todas: o resto do motor
+    #     (CP-SAT, dashboard, publicacao) le `cen.unidade_cobertura[cidade]`, e trocar a
+    #     forma obrigaria a mexer em tudo isso para nao ganhar nada.
+    _u=str(unidade_cobertura or "ligacoes").strip().lower()
+    _u=("economias" if _u.startswith("econ") else ("populacao" if _u.startswith("pop") else "ligacoes"))
+    # SOBRE `cid_name`, E NAO SOBRE `cidop`: a regua e da RODADA, entao vale para
+    # toda cidade do cenario — inclusive a que nao tem linha em
+    # `cidade_operacional`. Enquanto era coluna daquela tabela, montar o
+    # dicionario a partir dela era natural; agora seria um buraco: a cidade sem
+    # ficha entraria no cenario, apareceria nos nos, e a publicacao gravaria
+    # `unidade_cobertura` NULO para ela — uma linha de resultado sem dizer em que
+    # moeda foi medida.
+    _unid={_nm:_u for _nm in cid_name.values()}
     _ufat={}; _sem_pop=[]
     for _sb2,_sis2 in sis_de_sb.items():
         _cn2=cid_name[sis_cid[_sis2]]; _u2=_unid.get(_cn2,"ligacoes"); _so2=subop.get(_sb2,{})

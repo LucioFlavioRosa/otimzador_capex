@@ -68,13 +68,11 @@
  "cidade-operacional": [
   {
    "cidade_id": "c1",
-   "data_fim_concessao": 2045,
-   "unidade_cobertura": "economias"
+   "data_fim_concessao": 2045
   },
   {
    "cidade_id": "c2",
-   "data_fim_concessao": 2045,
-   "unidade_cobertura": "populacao"
+   "data_fim_concessao": 2045
   }
  ],
  "subbacia-operacional": [

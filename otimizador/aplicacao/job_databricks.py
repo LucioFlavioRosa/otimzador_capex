@@ -65,6 +65,9 @@ MAPA_PARAMS = {
     # O recorte da meta. Antes era `INCLUIR_INDUSTRIAL`, que subtraia industria de
     # receita e vazao junto; hoje ele so escolhe em que moeda a COBERTURA e medida.
     "COBERTURA_SO_RESIDENCIAL": "cobertura_so_residencial",
+    # A regua da cobertura: ligacoes (default) | economias | populacao. Era coluna
+    # de cadastro por cidade ate a migracao 019 do servico.
+    "UNIDADE_COBERTURA": "unidade_cobertura",
 }
 # chaves que sao do JOB, nao do motor (nao viram kwarg do ler_banco)
 CHAVES_DO_JOB = {"USUARIO", "MAX_TIME_S", "WORKERS"}

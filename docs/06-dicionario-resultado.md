@@ -150,8 +150,9 @@ cadeia) · `is_cts` · `tipo_estrutura` · `latitude` / `longitude`.
 **Base comercial:** `ligacoes_atuais` · `ligacoes_novas` · `ticket_medio` · `arrecadacao` ·
 `vazao_marginal` · `potencial_crescimento` · `wacc_receita` · `horizonte_anos`.
 
-**Régua de cobertura:** `unidade_cobertura` (`ligacoes` | `economias` | `populacao`) ·
-`fator_unidade_cobertura` e `unid_fator_cobertura` (conversão para a régua da cidade) ·
+**Régua de cobertura:** `unidade_cobertura` (`ligacoes` | `economias` | `populacao`) —
+o parâmetro `UNIDADE_COBERTURA` da rodada, repetido em cada linha para o resultado ser
+lido sozinho · `fator_unidade_cobertura` e `unid_fator_cobertura` (conversão para a régua) ·
 `densidade_economias` · `densidade_populacao`.
 
 **Faturamento:** `faturando` (BOOLEAN) · `obra_coleta` (a obra âncora) ·
@@ -233,7 +234,7 @@ por cidade sem varrer `otim_obra`.
 `sub_bacias` · `obras_feitas` / `obras_fora` · `capex_total` · `vpl` · `ligacoes_novas` ·
 `universo` · `base_atendida` · `cobertura_base_pct` (antes) · `cobertura_final_pct` (depois) ·
 `metas_total` / `metas_atingidas` · `paridade_inicial` / `paridade_final` · `peso_cidade` ·
-`unidade_cobertura` (a régua da cidade).
+`unidade_cobertura` (a régua da rodada).
 
 **`otim_cobertura`** · PK `(run_id, cidade, ano)` — cobertura realizada ano a ano:
 `ligacoes_cobertas` · `universo` · `cobertura_pct`.

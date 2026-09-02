@@ -201,9 +201,14 @@ coletor muda a vazão dela, quem atualiza a base é quem cadastra. 13 testes fix
 individualmente, e a capacidade cresce com o fluxo. Muda a **cardinalidade do problema**, não
 é um ajuste fino. Default do motor: **desligada**.
 
-**Régua de cobertura** (`input.cidade_operacional.unidade_cobertura`) — cada cidade mede
-cobertura em `ligacoes`, `economias` **ou** `populacao`. Isso define a régua da meta e da
-faixa de paridade daquela cidade. **A receita continua sempre em ligações**, em qualquer régua.
+**Régua de cobertura** (parâmetro de rodada `UNIDADE_COBERTURA`) — a rodada mede
+cobertura em `ligacoes` (default), `economias` **ou** `populacao`. Isso define a régua da
+meta e da faixa de paridade, e vale para a **unidade inteira**. **A receita continua sempre
+em ligações**, em qualquer régua.
+
+Era coluna de cadastro por cidade (`cidade_operacional.unidade_cobertura`) até a migração
+019 do serviço. Duas cidades da mesma unidade medidas em moedas diferentes davam uma
+cobertura que não soma.
 
 **Parcela residencial** — as colunas sem sufixo (`universo_ligacoes`, `receita_*`,
 `vazao_contribuicao`) são o **TOTAL** = residencial + industrial. As colunas `*_residencial`
