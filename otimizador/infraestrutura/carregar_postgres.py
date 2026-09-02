@@ -32,6 +32,10 @@ from __future__ import annotations
 #: de `superintendencia-cidade` junta `cidade` para trazer o NOME — o motor usa
 #: `cidade_name` no rotulo, e sem ele a cidade aparece pelo codigo.
 ABAS_INPUT = {
+    # ANTES de `unidade-regional`, e a ordem nao e estetica: `unidade_regional`
+    # tem FK para `diretoria`, e na carga (ver `TABELAS_DE_CARGA`) a filha
+    # inserida primeiro reprova.
+    "diretoria":                   "SELECT * FROM {s}.diretoria",
     "unidade-regional":            "SELECT * FROM {s}.unidade_regional",
     "regional-superintendencia":   "SELECT emp_codigo AS superintendencia_id, unidade_id "
                                    "FROM {s}.empresa",
@@ -59,7 +63,12 @@ ABAS_INPUT = {
 
 #: Abas que podem legitimamente NAO existir (a unidade nao tem CTS; o orcamento veio por
 #: parametro). So estas toleram SQLSTATE 42P01.
-ABAS_OPCIONAIS = {"subbacia-cts", "cts-operacional", "componentes-cts-capex", "orcamento"}
+#:
+#: `diretoria` entra aqui porque o nivel e NOVO (migracao 017 do servico): um banco
+#: que ainda nao migrou nao tem a tabela, e o motor nao pode recusar a carga por
+#: causa de um nivel que ele proprio nao le.
+ABAS_OPCIONAIS = {"subbacia-cts", "cts-operacional", "componentes-cts-capex", "orcamento",
+                  "diretoria"}
 
 #: Abas cujo conteudo VAZIO e sempre erro: sem elas o Cenario nao faz sentido. As que ficam
 #: de fora podem vir vazias — o motor tolera (`fator_esgoto` sem faixas cai em paridade
@@ -80,11 +89,14 @@ ABAS_ESTRUTURAIS = {"unidade-regional", "regional-superintendencia", "superinten
 #: (`cidade`) e o vinculo ficou em `cidade_empresa` —, o que um mapa de um-para-um nao
 #: consegue dizer.
 #:
-#: `colunas=None` significa "todas as que a tabela tiver". A ORDEM da lista importa:
-#: `cidade` antes de `cidade_empresa`, senao a FK reprova.
+#: `colunas=None` significa "todas as que a tabela tiver". A ORDEM importa DUAS
+#: vezes: dentro da lista de uma aba (`cidade` antes de `cidade_empresa`) e ENTRE
+#: as abas (`diretoria` antes de `unidade-regional`). Nos dois casos pelo mesmo
+#: motivo: a filha inserida antes da mae reprova na FK.
 #:
 #: Usado por `scripts/smoke_test_postgres.py` para semear um Postgres de teste.
 TABELAS_DE_CARGA = {
+    "diretoria":                   [("diretoria", None, {})],
     "unidade-regional":            [("unidade_regional", None, {})],
     "regional-superintendencia":   [("empresa", ["emp_codigo", "unidade_id"],
                                      {"superintendencia_id": "emp_codigo"})],
