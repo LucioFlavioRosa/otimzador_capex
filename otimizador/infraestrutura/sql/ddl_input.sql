@@ -128,15 +128,16 @@ CREATE TABLE IF NOT EXISTS input.sistema_topologia (
 
 -- ---- OPERACIONAL ----------------------------------------------------------
 -- aba do motor: cidade-operacional
+-- `unidade_cobertura` SAIU desta tabela (migracao 019 do servico). A regua da
+-- cobertura — ligacoes | economias | populacao — nao e dado de cadastro: e a
+-- LENTE com que se olha o mesmo cadastro, e virou parametro de rodada
+-- (`UNIDADE_COBERTURA`), valendo para a unidade inteira. Duas cidades da mesma
+-- unidade medidas em reguas diferentes nao respondiam pergunta nenhuma.
 CREATE TABLE IF NOT EXISTS input.cidade_operacional (
     cidade_id          text PRIMARY KEY
         REFERENCES input.cidade(cidade_id),
-    data_fim_concessao integer,
-    unidade_cobertura  text
+    data_fim_concessao integer
 );
-COMMENT ON COLUMN input.cidade_operacional.unidade_cobertura IS
-    'ligacoes | economias | populacao. Define a REGUA da meta e da faixa de paridade '
-    'daquela cidade. A receita continua sempre em ligacoes.';
 
 -- aba do motor: subbacia-operacional
 CREATE TABLE IF NOT EXISTS input.subbacia_operacional (
@@ -183,8 +184,8 @@ COMMENT ON COLUMN input.subbacia_operacional.ligacoes_atuais_residencial IS
     'Residenciais JA atendidas. Com COBERTURA_SO_RESIDENCIAL=True e a base da meta; o '
     'total continua sendo quem paga a receita.';
 COMMENT ON COLUMN input.subbacia_operacional.universo_economias_residencial IS
-    'Universo de economias residenciais. Usada quando a cidade mede cobertura em '
-    'economias (input.cidade_operacional.unidade_cobertura).';
+    'Universo de economias residenciais. Usada quando a rodada mede cobertura em '
+    'economias (parametro UNIDADE_COBERTURA).';
 COMMENT ON COLUMN input.subbacia_operacional.economias_atuais_residencial IS
     'Economias residenciais ja atendidas. O RECORTE ACABA NA COBERTURA: receita, VPL, '
     'vazao e CAPEX seguem no total em qualquer modo. Cidade que mede em POPULACAO ignora '

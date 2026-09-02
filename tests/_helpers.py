@@ -96,11 +96,18 @@ def load_fixture(usar_cts=True, unidade=UNIDADE_FIXTURE, cobertura_so_residencia
                   cobertura_so_residencial=cobertura_so_residencial)
 
 
-def load_classe(cobertura_so_residencial=False):
-    """Banco com parcela industrial (b1/b3) e cobertura por economias (c1) e populacao (c2)."""
+def load_classe(cobertura_so_residencial=False, unidade_cobertura="ligacoes"):
+    """Banco com parcela industrial (b1/b3), lido na REGUA que o teste pedir.
+
+    A regua era coluna da cidade — a fixture trazia c1 em economias e c2 em
+    populacao, e cada teste herdava a sua sem dizer qual era. Virou PARAMETRO DE
+    RODADA, e uma rodada tem UMA regua para a unidade inteira: cada teste agora
+    declara em que moeda esta medindo, que e o que ele sempre quis dizer.
+    """
     M = engine()
     return silent(M.ler_banco, banco(BANK_CLASSE),
-                  cobertura_so_residencial=cobertura_so_residencial)
+                  cobertura_so_residencial=cobertura_so_residencial,
+                  unidade_cobertura=unidade_cobertura)
 
 
 def build_all(cen):
