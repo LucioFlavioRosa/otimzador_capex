@@ -1335,7 +1335,14 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     #     forma obrigaria a mexer em tudo isso para nao ganhar nada.
     _u=str(unidade_cobertura or "ligacoes").strip().lower()
     _u=("economias" if _u.startswith("econ") else ("populacao" if _u.startswith("pop") else "ligacoes"))
-    _unid={cid_name.get(_c,_c):_u for _c in cidop}
+    # SOBRE `cid_name`, E NAO SOBRE `cidop`: a regua e da RODADA, entao vale para
+    # toda cidade do cenario — inclusive a que nao tem linha em
+    # `cidade_operacional`. Enquanto era coluna daquela tabela, montar o
+    # dicionario a partir dela era natural; agora seria um buraco: a cidade sem
+    # ficha entraria no cenario, apareceria nos nos, e a publicacao gravaria
+    # `unidade_cobertura` NULO para ela — uma linha de resultado sem dizer em que
+    # moeda foi medida.
+    _unid={_nm:_u for _nm in cid_name.values()}
     _ufat={}; _sem_pop=[]
     for _sb2,_sis2 in sis_de_sb.items():
         _cn2=cid_name[sis_cid[_sis2]]; _u2=_unid.get(_cn2,"ligacoes"); _so2=subop.get(_sb2,{})

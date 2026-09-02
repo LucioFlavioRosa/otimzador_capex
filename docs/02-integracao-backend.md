@@ -52,7 +52,7 @@ isso as FKs existem.
 | `superintendencia_cidade` | `cidade_id` | FK → superintendência |
 | `cidade_sistema` | `sistema_id` | FK → cidade |
 | `sistema_topologia` | `componente_sistema_id` | id de nó é **global** (o motor indexa por ele): não repita o mesmo id em dois sistemas. `componente_sistema_id_jusante` monta a cadeia até a ETE |
-| `cidade_operacional` | `cidade_id` | `unidade_cobertura` = régua da cidade; `data_fim_concessao` = horizonte |
+| `cidade_operacional` | `cidade_id` | `data_fim_concessao` = horizonte (a régua da cobertura saiu daqui: é o parâmetro `UNIDADE_COBERTURA` da rodada) |
 | `subbacia_operacional` | `sub_bacia` | o cadastro econômico da sub-bacia |
 | `componentes_subbacias_capex` | `(sub_bacia, componente)` | uma linha = uma obra possível |
 | `ete_capex` | `ete_id` | módulos, capacidade, capex de terreno |
