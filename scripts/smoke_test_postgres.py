@@ -82,7 +82,11 @@ PARAMS_RODADA = {
     "ORCAMENTO": {"2026": 20_000_000, "2027": 20_000_000, "2028": 20_000_000},
     "BASE_RECEITA": "arrecadada",
     "USAR_CTS": True,
-    "INCLUIR_INDUSTRIAL": True,
+    # `INCLUIR_INDUSTRIAL: True` ate aqui, e o job recusava a rodada inteira: o
+    # parametro foi RENOMEADO no motor (ver MAPA_PARAMS em job_databricks.py) e a
+    # fixture ficou para tras. `True` la significava "nao subtraia industria",
+    # entao o equivalente e cobertura NAO restrita a residencial.
+    "COBERTURA_SO_RESIDENCIAL": False,
     "USUARIO": "smoke-test",
     "MAX_TIME_S": 60,
 }
@@ -191,8 +195,8 @@ def passo_ddl(conn, rel, s_in, s_ctrl, s_pub):
     n_vw = _um(conn, "SELECT count(*) FROM information_schema.views WHERE table_schema = %s",
                (s_pub,))
     rel.ok("tabelas criadas", f"{n_in} de entrada · {n_pub} de saida · {n_vw} views") \
-        if (n_in, n_pub, n_vw) == (16, 14, 3) else \
-        rel.falha("tabelas criadas", f"esperado 16/14/3, veio {n_in}/{n_pub}/{n_vw}")
+        if (n_in, n_pub, n_vw) == (18, 14, 3) else \
+        rel.falha("tabelas criadas", f"esperado 18/14/3, veio {n_in}/{n_pub}/{n_vw}")
 
     # o CASCADE e o que faz a republicacao ficar limpa — confirma que a FK existe mesmo
     n_fk = _um(conn, """SELECT count(*) FROM information_schema.referential_constraints rc
