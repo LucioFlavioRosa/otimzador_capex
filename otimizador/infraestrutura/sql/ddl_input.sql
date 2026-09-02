@@ -23,12 +23,20 @@ CREATE SCHEMA IF NOT EXISTS controle;
 
 -- ---- HIERARQUIA -----------------------------------------------------------
 -- aba do motor: unidade-regional
+-- `usa_macrorregiao_cts` e da REGIONAL, e nao do Databricks: marcado, CADA sistema da
+-- unidade aceita UMA CTS; desmarcado, aceitam varias. Regra de cadastro — o
+-- motor ignora, porque para ele uma ou duas CTS sao nos como quaisquer outros.
+--
+-- ESTAVA EM `cidade_sistema`, uma linha por sistema, ate a migracao 016 do
+-- servico. A decisao e da unidade: quem opera decide uma vez e vale para todos os
+-- sistemas dentro dela.
 CREATE TABLE IF NOT EXISTS input.unidade_regional (
-    unidade_id    text PRIMARY KEY,
-    unidade_name  text,
-    regional_id   text NOT NULL,
-    regional_name text,
-    wacc_medio    double precision
+    unidade_id      text PRIMARY KEY,
+    unidade_name    text,
+    regional_id     text NOT NULL,
+    regional_name   text,
+    wacc_medio      double precision,
+    usa_macrorregiao_cts boolean NOT NULL DEFAULT false
 );
 
 -- HIERARQUIA v8: a EMPRESA OPERADORA no lugar da superintendencia.
@@ -62,15 +70,13 @@ CREATE TABLE IF NOT EXISTS input.cidade_empresa (
 
 -- aba do motor: cidade-sistema
 --
--- `usa_sistema_cts` e da REGIONAL, e nao do Databricks: marcado, o sistema aceita
--- UMA CTS; desmarcado, aceita varias. Regra de cadastro — o motor ignora, porque
--- para ele uma ou duas CTS sao nos como quaisquer outros.
+-- `usa_sistema_cts` SAIU DAQUI: a decisao passou a ser da unidade (ver
+-- `unidade_regional` acima), e vale para todos os sistemas dentro dela.
 CREATE TABLE IF NOT EXISTS input.cidade_sistema (
-    sistema_id      text PRIMARY KEY,
-    sistema_name    text,
-    cidade_id       text NOT NULL
-        REFERENCES input.cidade(cidade_id),
-    usa_sistema_cts boolean NOT NULL DEFAULT false
+    sistema_id   text PRIMARY KEY,
+    sistema_name text,
+    cidade_id    text NOT NULL
+        REFERENCES input.cidade(cidade_id)
 );
 
 -- aba do motor: sistema-topologia

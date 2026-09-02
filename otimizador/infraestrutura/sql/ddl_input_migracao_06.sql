@@ -1,3 +1,11 @@
+-- SUPERADA PELA MIGRACAO 016 DO SERVICO (`otimizador-backend/migracoes/`).
+--
+-- A decisao de usar sistema de CTS passou a ser da UNIDADE, e a coluna que esta
+-- migracao criou em `cidade_sistema` foi REMOVIDA. O arquivo fica como historico
+-- — e o que explica as 142 linhas de trilha com `tipo = 'sistema'`. NAO aplique
+-- num banco novo: `ddl_input.sql` ja traz a coluna no lugar certo
+-- (`unidade_regional`), e rodar isto depois recria uma coluna morta.
+--
 -- Migração 06 — o sistema declara se usa SISTEMA DE CTS.
 --
 -- O QUE MUDA. `cidade_sistema` ganha `usa_sistema_cts boolean`. Marcado, o
