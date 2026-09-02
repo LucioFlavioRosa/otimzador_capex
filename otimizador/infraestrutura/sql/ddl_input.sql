@@ -23,6 +23,26 @@ CREATE SCHEMA IF NOT EXISTS controle;
 
 -- ---- HIERARQUIA -----------------------------------------------------------
 -- aba do motor: unidade-regional
+-- A DIRETORIA e o nivel entre a regional e a unidade. A hierarquia inteira e
+-- regional -> diretoria -> unidade -> empresa -> cidade -> sistema, e a fonte a
+-- traz nesta ordem (colunas REGIONAL, DIRETORIA, UNIDADE, EMP_CODIGO, EMPRESA,
+-- CIDADE do extrato de portfolio).
+--
+-- SEM ID PROPRIO NA FONTE: ela traz o NOME da diretoria, como traz o da
+-- regional. O id e derivado na carga, e por isso a tabela nao o gera sozinha.
+--
+-- `regional_id` SEM CHAVE ESTRANGEIRA, e nao por descuido: `input.regional` nao
+-- e criada por este arquivo — ela vive nas migracoes do SERVICO. E a mesma razao
+-- pela qual `unidade_regional.regional_id` logo abaixo tambem e `text` solto. Um
+-- REFERENCES aqui faria este DDL falhar em banco novo, que e onde ele mais serve.
+CREATE TABLE IF NOT EXISTS input.diretoria (
+    diretoria_id   text PRIMARY KEY,
+    diretoria_name text,
+    regional_id    text NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_diretoria_regional ON input.diretoria (regional_id);
+
 -- `usa_macrorregiao_cts` e da REGIONAL, e nao do Databricks: marcado, CADA sistema da
 -- unidade aceita UMA CTS; desmarcado, aceitam varias. Regra de cadastro — o
 -- motor ignora, porque para ele uma ou duas CTS sao nos como quaisquer outros.
@@ -35,9 +55,18 @@ CREATE TABLE IF NOT EXISTS input.unidade_regional (
     unidade_name    text,
     regional_id     text NOT NULL,
     regional_name   text,
+    -- NULAVEL: a carga pode trazer a unidade antes da diretoria dela, e um NOT
+    -- NULL faria a carga inteira falhar por um nivel que ainda nao chegou.
+    -- `diretoria_name` fica desnormalizado aqui pela mesma razao que
+    -- `regional_name`: a leitura do cadastro monta a arvore numa consulta so.
+    diretoria_id    text REFERENCES input.diretoria(diretoria_id),
+    diretoria_name  text,
     wacc_medio      double precision,
     usa_macrorregiao_cts boolean NOT NULL DEFAULT false
 );
+
+CREATE INDEX IF NOT EXISTS ix_unidade_diretoria
+  ON input.unidade_regional (diretoria_id);
 
 -- HIERARQUIA v8: a EMPRESA OPERADORA no lugar da superintendencia.
 --
