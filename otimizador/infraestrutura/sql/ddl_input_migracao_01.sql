@@ -1,3 +1,8 @@
+-- ATENCAO: `cidade_operacional.unidade_cobertura` FOI REMOVIDA (migracao 019 do
+-- servico). A regua da cobertura virou parametro de rodada (`UNIDADE_COBERTURA`).
+-- Este arquivo fica como historico; aplica-lo num banco novo recria uma coluna
+-- morta, que o motor nao le mais.
+--
 -- ============================================================================
 -- MIGRATION 01 — leva um banco criado com o ddl_input.sql ANTIGO ate o novo.
 -- Banco NOVO nao precisa desta migration: rode `ddl_input.sql` direto.

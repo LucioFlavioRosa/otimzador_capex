@@ -15,11 +15,9 @@ A invariante mais importante desta suite e a de baixo: o VPL NAO PODE MUDAR. Ela
 que separa esta versao da anterior, e e a que quebraria se alguem voltasse a descontar
 industria fora da cobertura.
 """
-import shutil
 
-import openpyxl
 import pytest
-from _helpers import (BANK_CLASSE, BANK_FIXTURE, build_all, capex_total, engine,
+from _helpers import (BANK_CLASSE, BANK_FIXTURE, banco, build_all, capex_total, engine,
                       load_classe, silent)
 
 
@@ -33,8 +31,8 @@ def test_sem_colunas_residenciais_modos_identicos():
     # sai igual. A engine avisa em voz alta (ALERTA) — o que nao pode e mudar numero
     # em silencio.
     M = engine()
-    a = silent(M.ler_banco, BANK_FIXTURE, unidade="u1", cobertura_so_residencial=False)
-    b = silent(M.ler_banco, BANK_FIXTURE, unidade="u1", cobertura_so_residencial=True)
+    a = silent(M.ler_banco, banco(BANK_FIXTURE), unidade="u1", cobertura_so_residencial=False)
+    b = silent(M.ler_banco, banco(BANK_FIXTURE), unidade="u1", cobertura_so_residencial=True)
     assert set(a.obras) == set(b.obras)
     assert sum(a.vazao.values()) == pytest.approx(sum(b.vazao.values()))
     assert sum(a.max_lig.values()) == pytest.approx(sum(b.max_lig.values()))
@@ -65,7 +63,7 @@ def test_receita_e_VPL_NAO_mudam():
 # ---------------------------------------------------------------- cobertura por unidade
 def test_universo_da_meta_cai_para_o_residencial():
     # b1: 1000 ligacoes, 800 residenciais; medida em ECONOMIAS (1,1 por ligacao).
-    on = load_classe(False); off = load_classe(True)
+    on = load_classe(False, "economias"); off = load_classe(True, "economias")
     c1 = _cidade(on, "b1")
     assert off.max_lig[c1] < on.max_lig[c1] - 1
 
@@ -73,7 +71,7 @@ def test_universo_da_meta_cai_para_o_residencial():
 def test_base_atendida_tambem_cai():
     # Nao basta o denominador virar residencial: a base ja atendida tem de vir da mesma
     # coluna, senao a cobertura de partida mistura as duas moedas e nasce inflada.
-    on = load_classe(False); off = load_classe(True)
+    on = load_classe(False, "economias"); off = load_classe(True, "economias")
     c1 = _cidade(on, "b1")
     assert off.base_lig[c1] < on.base_lig[c1] - 1
 
@@ -81,7 +79,7 @@ def test_base_atendida_tambem_cai():
 def test_cobertura_populacao_intacta():
     # Industria nao mora: o universo de populacao ja e residencial, e nao ha coluna
     # `populacao_*_residencial` para existir.
-    on = load_classe(False); off = load_classe(True)
+    on = load_classe(False, "populacao"); off = load_classe(True, "populacao")
     c2 = _cidade(on, "b3")
     assert off.max_lig[c2] == pytest.approx(on.max_lig[c2])
 
@@ -104,19 +102,16 @@ def test_sem_recorte_as_duas_quantidades_sao_iguais():
         assert o.lig_cob == pytest.approx(o.lig)
 
 
-def test_cobertura_em_ligacoes_tambem_cai(tmp_path):
-    # muda c1 para LIGACOES: o recorte nao pode depender da unidade de cobertura.
-    dst = tmp_path / "classe_ligacoes.xlsx"
-    shutil.copy(BANK_CLASSE, dst)
-    wb = openpyxl.load_workbook(dst); ws = wb["cidade-operacional"]
-    h = [c.value for c in ws[1]]; ic = h.index("cidade_id") + 1; iu = h.index("unidade_cobertura") + 1
-    for r in range(2, ws.max_row + 1):
-        if ws.cell(r, ic).value == "c1":
-            ws.cell(r, iu).value = "ligacoes"
-    wb.save(dst)
+def test_cobertura_em_ligacoes_tambem_cai():
+    # Em LIGACOES: o recorte residencial nao pode depender da regua da cobertura.
+    # Era preciso reescrever a coluna da cidade na fixture; hoje a regua e um
+    # parametro, e o teste a pede diretamente.
+    abas = banco(BANK_CLASSE)
     M = engine()
-    on = silent(M.ler_banco, str(dst), cobertura_so_residencial=False)
-    off = silent(M.ler_banco, str(dst), cobertura_so_residencial=True)
+    on = silent(M.ler_banco, abas, cobertura_so_residencial=False,
+                unidade_cobertura="ligacoes")
+    off = silent(M.ler_banco, abas, cobertura_so_residencial=True,
+                 unidade_cobertura="ligacoes")
     c1 = on.nos["b1"].cidade
     assert off.max_lig[c1] < on.max_lig[c1] - 1
     # O universo e AGREGADO POR CIDADE: c1 tem b1 (1000 ligacoes, 800 residenciais) e b2

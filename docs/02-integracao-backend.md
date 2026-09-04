@@ -52,7 +52,7 @@ isso as FKs existem.
 | `superintendencia_cidade` | `cidade_id` | FK → superintendência |
 | `cidade_sistema` | `sistema_id` | FK → cidade |
 | `sistema_topologia` | `componente_sistema_id` | id de nó é **global** (o motor indexa por ele): não repita o mesmo id em dois sistemas. `componente_sistema_id_jusante` monta a cadeia até a ETE |
-| `cidade_operacional` | `cidade_id` | `unidade_cobertura` = régua da cidade; `data_fim_concessao` = horizonte |
+| `cidade_operacional` | `cidade_id` | `data_fim_concessao` = horizonte (a régua da cobertura saiu daqui: é o parâmetro `UNIDADE_COBERTURA` da rodada) |
 | `subbacia_operacional` | `sub_bacia` | o cadastro econômico da sub-bacia |
 | `componentes_subbacias_capex` | `(sub_bacia, componente)` | uma linha = uma obra possível |
 | `ete_capex` | `ete_id` | módulos, capacidade, capex de terreno |
@@ -86,9 +86,8 @@ somar.** As quatro colunas do recorte são `universo_ligacoes_residencial`,
 
 **O RECORTE ACABA NA COBERTURA.** Receita, VPL, vazão e CAPEX usam o total nos dois modos —
 quem paga a conta é a ligação, seja de casa ou de fábrica, e a indústria manda esgoto que a
-ETE precisa tratar. A versão anterior deste recorte (`INCLUIR_INDUSTRIAL`, com colunas
-`*_industrial`) descontava a parcela de ligações, receita **e vazão**; ela não existe mais, e
-as colunas foram removidas do DDL pela migração `ddl_input_migracao_02.sql`.
+ETE precisa tratar. Não há coluna `*_industrial` no cadastro: a parcela residencial é medida,
+não deduzida por subtração.
 
 **(b2) A sub-bacia diz o que atende SEM a CTS.**
 
@@ -106,22 +105,28 @@ independentes: `universo_ligacoes_com_cts`, `ligacoes_atuais_com_cts`,
 `universo_economias_com_cts`, `economias_atuais_com_cts`, e as quatro
 `*_residencial_com_cts` equivalentes.
 
-**NÃO é a soma das duas linhas.** Era o que o motor fazia, e a ligação da área sobreposta,
-que está nas duas, era contada duas vezes: o universo da meta crescia sozinho ao desligar a
-CTS, e a cobertura piorava sem nenhuma obra ter mudado. O valor apurado vai ser **menor** que
-a soma onde houver sobreposição real.
+**NÃO é a soma das duas linhas.** A ligação da área sobreposta está nas duas, e somá-las a
+contaria duas vezes: onde houver sobreposição real, o valor apurado é **menor** que a soma.
 
-**Ligado e desligado deixam de ter a mesma demanda**, e isso é correto: sem o coletor, a
-parte da área que só ele alcançava não é atendida por ninguém.
+**Ligado e desligado não têm a mesma demanda**, e isso é correto: sem o coletor, a parte da
+área que só ele alcançava não é atendida por ninguém.
 
-**População, vazão e receita continuam somadas** da linha da CTS — não há coluna consolidada
-para elas. Onde houver sobreposição real elas ficam com a dupla contagem que as de cima
-deixaram de ter. É uma incoerência **conhecida** entre grandezas, não um esquecimento: vazão
-dobrada superdimensiona a ETE, e é o preço de não perder a demanda do coletor.
+**Vazão, receita e população NÃO são somadas.** Elas são **dado da sub-bacia**, e o motor não inventa o valor delas para o cenário sem coletor: se
+desligar a CTS muda a vazão da sub-bacia, **quem atualiza a base é quem cadastra**. A escolha
+de considerar ou não a CTS não mexe em receita.
+
+Duas consequências que valem estar escritas:
+
+- **A ETE é dimensionada com a vazão que estiver na base.** Se ela não refletir o cenário sem
+  coletor, falta o esgoto que vinha por ele. O motor avisa em toda rodada que absorve uma CTS.
+- **A receita da linha da CTS não é herdada.** Sem o coletor, as ligações que ele atenderia
+  são ligadas pelas obras da sub-bacia e cobradas pelo **ticket dela**. O ticket em si não
+  muda com a escolha: ele sai da base comercial da própria sub-bacia (`receita ÷ ligações
+  atuais exclusivas`), e o número consolidado não entra nessa divisão.
 
 Enquanto a exportação não trouxer os valores apurados, as oito são derivadas
 (`exclusiva + CTS pareada`, que reproduz exatamente a soma antiga) por
-`dev/preencher_sobreposicao_cts.py`, e a planilha marca isso em `sobreposicao_origem`
+a carga do cadastro, e a origem fica marcada em `sobreposicao_origem`
 (`derivado_soma` | `sem_cts`). Coluna ausente faz o motor voltar a somar, avisando.
 
 **População não tem versão residencial**: indústria não mora, então `universo_populacao` já é
@@ -131,7 +136,7 @@ residencial. Cidade que mede a meta em população ignora as quatro colunas acim
 apuração de quantas ligações e economias são residenciais é da base comercial, e é ela que
 deve preenchê-las. Enquanto a exportação não as trouxer, elas são derivadas
 (`total − parcela industrial`, economias pela proporção das ligações) por
-`dev/preencher_recorte_residencial.py` no repositório do backend, e a planilha marca isso na
+a carga do cadastro, e a origem fica marcada na
 coluna de controle `residencial_origem` (`derivado` | `sem_industria`). **Valor derivado não
 é medição** — quem usa o resultado de uma rodada só-residencial precisa saber qual dos dois
 está lendo.
@@ -232,7 +237,7 @@ Três regras, validadas em `job_databricks._params_para_ler_banco`:
 | Chave | Default | O que faz |
 |---|---|---|
 | `USUARIO` | `"job-databricks"` | vai para `otim_meta.usuario`, aparece no histórico |
-| `MAX_TIME_S` | `300` | tempo máximo do solver, por rodada |
+| `MAX_TIME_S` | `300` | tempo máximo do solver, por rodada. É o default **do job**, usado só quando a rodada não traz o valor; o backend sempre envia o dele no `params` |
 | `WORKERS` | `8` | threads do CP-SAT |
 
 ---
@@ -419,7 +424,7 @@ Demais consequências para o backend:
 | `ERRO`: `run_request nao encontrada para run_id=...` | job disparado antes do `INSERT`, ou `run_id` diferente | inserir e **commitar** antes de disparar |
 | `ERRO`: `falha ao ler input.<tabela>` | permissão, rede, ou tabela ausente que não é opcional | ver `03-producao.md` §7 |
 | `ERRO`: `input incompleto no Postgres: falta 'subbacia_operacional'` | cadastro vazio para a unidade | conferir o carregamento do `input` |
-| `FALHAU_QUALIDADE` com "duplicatas nas PKs" | cadastro duplicado gerou resultado duplicado | conferir `input` e o `run_diagnostico` |
+| `FALHOU_QUALIDADE` com "duplicatas nas PKs" | cadastro duplicado gerou resultado duplicado | conferir `input` e o `run_diagnostico` |
 | Plano vazio, mas `SUCESSO` | "Plano não-vazio" é **aviso**, não crítico | decisão de negócio: se plano vazio deve barrar, mudar o nível em `qualidade.py` |
 | Resultado diferente do notebook com o mesmo cadastro | `params` diferente — tipicamente `FOCO_COBERTURA` ou `ETE_FASEADA` | comparar `otim_meta.params_extra` das duas rodadas |
 

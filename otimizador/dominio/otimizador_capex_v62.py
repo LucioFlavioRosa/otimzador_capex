@@ -717,42 +717,6 @@ def viavel(cen,plano):
     return True,"ok"
 
 # ---------- solvers
-def ler_excel(path):
-    from openpyxl import load_workbook
-    wb=load_workbook(path,data_only=True)
-    def linhas(aba):
-        if aba not in wb.sheetnames: return []
-        rows=list(wb[aba].iter_rows(values_only=True));hi=0
-        for i,rw in enumerate(rows):
-            if rw and rw[1] is not None and isinstance(rw[0],str) and " " not in str(rw[0]): hi=i;break
-        hdr=[str(h).strip() for h in rows[hi] if h is not None];out=[]
-        for rw in rows[hi+1:]:
-            if rw is None or all(x is None for x in rw): continue
-            out.append(dict(zip(hdr,rw)))
-        return out
-    par={str(d["parametro"]):d["valor"] for d in linhas("Parametros")}
-    anos=int(par.get("anos",20))
-    cids=[Cidade(d["cidade"],d["cobertura_atual"],d["universo"],d["meta_aumento"],d["obras_paralelo"]) for d in linhas("Cidades")]
-    nos=[No(d["no"],d["cidade"],d["sistema"],d["regional"],d["jusante"]) for d in linhas("Nos")]
-    obras=[]
-    for d in linhas("Obras_Coleta"):
-        obras.append(Obra(d["id"],"coleta",no=d["no"],
-            capex_comp={"Ligacao":d.get("capex_ligacao",0),"Rede":d.get("capex_rede",0)},
-            opex_ano=d.get("opex_ano",0),prazo_exec=d.get("prazo_exec",0),obrigatoria=int(d.get("obrigatoria",0) or 0),
-            proibida_ate=d.get("proibida_ate",0),ligacoes=d.get("ligacoes",0),ticket_mes=d.get("ticket_mes",0),
-            preco_ligacao=d.get("preco_ligacao",0),arrec_dir=d.get("arrec_dir",1),arrec_ind=d.get("arrec_ind",1),
-            lag=d.get("lag",1),maturacao=d.get("maturacao",2),wacc=d.get("wacc")))
-    for d in linhas("Obras_Transporte"):
-        obras.append(Obra(d["id"],"transporte",no=d["no"],
-            capex_comp={"Tronco":d.get("capex_tronco",0),"EEE":d.get("capex_eee",0),"LR":d.get("capex_lr",0)},
-            opex_ano=d.get("opex_ano",0),prazo_exec=d.get("prazo_exec",0),obrigatoria=int(d.get("obrigatoria",0) or 0),
-            proibida_ate=d.get("proibida_ate",0),wacc=d.get("wacc")))
-    for d in linhas("Obras_ETE"):
-        obras.append(Obra(d["id"],"ete",sistema=d["sistema"],capex_comp={"ETE":d.get("capex_ete",0)},
-            opex_ano=d.get("opex_ano",0),prazo_exec=d.get("prazo_exec",0),obrigatoria=int(d.get("obrigatoria",0) or 0),
-            proibida_ate=d.get("proibida_ate",0),wacc=d.get("wacc")))
-    orc={d["regional"]:float(d["valor_ano"]) for d in linhas("Orcamento")}
-    return Cenario(nos,cids,obras,orc,anos=anos)
 
 def imprimir(cen,res,titulo="RESULTADO"):
     print(f"\n=== {titulo} ===");print(f"VPL total: R$ {res['vpl']:,.0f}")
@@ -780,95 +744,38 @@ def imprimir(cen,res,titulo="RESULTADO"):
         print(f"  {cid}: +{d['adicionado']:.0f}/{d['meta']:.0f} lig -> {flag}{ex}")
 
 
-def listar_regionais(path):
-    """Regionais disponiveis no banco: [(regional_id, nome, nº de cidades, nº de sub-bacias)]."""
-    from openpyxl import load_workbook
-    wb=load_workbook(path,data_only=True,read_only=True)
-    def _L(*abas):
-        aba=next((a for a in abas if a in wb.sheetnames), None)
-        if aba is None: return []
-        rows=list(wb[aba].iter_rows(values_only=True)); hi=0
-        for i,rw in enumerate(rows):
-            if rw and len([x for x in rw if x is not None])>=2: hi=i;break
-        hdr=[(str(h).strip().lower().replace(" ","_").replace("-","_") if h is not None else None) for h in rows[hi]]
-        return [{k:v for k,v in zip(hdr,rw) if k} for rw in rows[hi+1:] if rw and not all(x is None for x in rw)]
-    reg={d["regional_id"]:(d.get("regional_name") or d["regional_id"]) for d in _L("unidade-regional","unidade_regional")}
-    uni={d["unidade_id"]:d["regional_id"] for d in _L("unidade-regional","unidade_regional")}
-    sup={d["superintendencia_id"]:d["unidade_id"] for d in _L("regional-superintendencia","regional-superintendência")}
-    cid={d["cidade_id"]:d["superintendencia_id"] for d in _L("superintendencia-cidade")}
-    sis={d["sistema_id"]:d["cidade_id"] for d in _L("cidade-sistema")}
-    _etes={d.get("ete_id") for d in _L("ete-capex")}
-    sb={}
-    for d in _L("sistema-topologia"):
-        _c=d.get("componente_sistema_id")
-        if _c is not None and _c not in _etes: sb[_c]=d.get("sistema_id")   # ETE vem da aba ete-capex
-    out={}
-    for _s,_c in sis.items():
-        _r=uni.get(sup.get(cid.get(_c)))
-        if _r is None: continue
-        o=out.setdefault(_r,{"cidades":set(),"sistemas":set(),"sub":0})
-        o["cidades"].add(_c); o["sistemas"].add(_s)
-    for _b,_s in sb.items():
-        _c=sis.get(_s); _r=uni.get(sup.get(cid.get(_c)))
-        if _r in out: out[_r]["sub"]+=1
-    return [(r, reg.get(r,r), len(v["cidades"]), v["sub"]) for r,v in sorted(out.items())]
 
 
-def listar_unidades(path):
-    """Unidades disponiveis: [(unidade_id, unidade_nome, regional_nome, nº cidades, nº sub-bacias)].
-    A UNIDADE e o recorte mais fino de selecao — uma regional pode ter varias."""
-    from openpyxl import load_workbook
-    wb=load_workbook(path,data_only=True,read_only=True)
-    def _L(*abas):
-        aba=next((a for a in abas if a in wb.sheetnames), None)
-        if aba is None: return []
-        rows=list(wb[aba].iter_rows(values_only=True)); hi=0
-        for i,rw in enumerate(rows):
-            if rw and len([x for x in rw if x is not None])>=2: hi=i;break
-        hdr=[(str(h).strip().lower().replace(" ","_").replace("-","_") if h is not None else None) for h in rows[hi]]
-        return [{k:v for k,v in zip(hdr,rw) if k} for rw in rows[hi+1:] if rw and not all(x is None for x in rw)]
-    ur=_L("unidade-regional","unidade_regional")
-    uni_nome={d["unidade_id"]:(d.get("unidade_name") or d["unidade_id"]) for d in ur}
-    uni_reg ={d["unidade_id"]:(d.get("regional_name") or d["regional_id"]) for d in ur}
-    sup={d["superintendencia_id"]:d["unidade_id"] for d in _L("regional-superintendencia","regional-superintendência")}
-    cid={d["cidade_id"]:d["superintendencia_id"] for d in _L("superintendencia-cidade")}
-    sis={d["sistema_id"]:d["cidade_id"] for d in _L("cidade-sistema")}
-    _etes={d.get("ete_id") for d in _L("ete-capex")}
-    sb={}
-    for d in _L("sistema-topologia"):
-        _c=d.get("componente_sistema_id")
-        if _c is not None and _c not in _etes: sb[_c]=d.get("sistema_id")   # ETE vem da aba ete-capex
-    out={}
-    for _c,_sp in cid.items():
-        _u=sup.get(_sp)
-        if _u is None: continue
-        out.setdefault(_u,{"cidades":set(),"sub":0})["cidades"].add(_c)
-    for _b,_s in sb.items():
-        _u=sup.get(cid.get(sis.get(_s)))
-        if _u in out: out[_u]["sub"]+=1
-    return [(u, uni_nome.get(u,u), uni_reg.get(u,""), len(v["cidades"]), v["sub"]) for u,v in sorted(out.items())]
 
 
-def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_faseada=False, metas_cobertura=None, peso_cobertura=0.0, foco_cobertura=None, penalidade_cobertura="meta+cobertura", data_inicio=None, orcamento_total=None, peso_cidade=None, regional=None, unidade=None, curva_adocao="scurve", base_receita="arrecadada", anos_extra_conclusao=3, usar_cts=True, cobertura_so_residencial=False):
-    """Le o banco no formato de JUNCOES (banco_dados_v3): hierarquia em tabelas de ligacao,
-    sistema-topologia (jusante), subbacia-operacional (=sub-bacia), componentes/ete-capex,
-    regional-operacional. Cobertura e CONCESSAO por CIDADE (cidade-operacional + metas-cobertura por cidade). Horizonte do sistema = fim da sua cidade; taxa por REGIONAL."""
-    from openpyxl import load_workbook
+def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_faseada=False, metas_cobertura=None, peso_cobertura=0.0, foco_cobertura=None, penalidade_cobertura="meta+cobertura", data_inicio=None, orcamento_total=None, peso_cidade=None, regional=None, unidade=None, curva_adocao="scurve", base_receita="arrecadada", anos_extra_conclusao=3, usar_cts=True, cobertura_so_residencial=False, unidade_cobertura="ligacoes"):
+    """Monta o Cenario a partir das ABAS do input, no formato de JUNCOES: hierarquia em
+    tabelas de ligacao, sistema-topologia (jusante), subbacia-operacional (=sub-bacia),
+    componentes/ete-capex, regional-operacional. Cobertura e CONCESSAO por CIDADE
+    (cidade-operacional + metas-cobertura por cidade). Horizonte do sistema = fim da sua
+    cidade; taxa por REGIONAL.
+
+    `abas` E UM DICIONARIO {nome_da_aba: [linha, ...]}, e cada linha e um dicionario de
+    coluna -> valor, com a coluna ja normalizada (minuscula, `_` no lugar de espaco e
+    hifen). Nao e um caminho de arquivo: o motor nao le planilha.
+
+    Quem monta o dicionario e a FONTE — `carregar_postgres.abas_do_postgres` em producao,
+    `tests/_helpers` a partir dos JSON de fixture. Assim a mesma funcao serve as duas sem
+    que nenhuma delas precise materializar arquivo nenhum.
+    """
     from collections import defaultdict
-    wb=load_workbook(path,data_only=True)
+    if isinstance(abas, (str, bytes)) or hasattr(abas, "__fspath__"):
+        raise TypeError(
+            "ler_banco recebe as ABAS (dict), nao um caminho de arquivo. "
+            "Use carregar_postgres.abas_do_postgres(pg_url) para ler do banco.")
     _BREC = "faturada" if str(base_receita).strip().lower().startswith("fat") else "arrecadada"  # base de receita da rodada
-    def L(*abas):
-        aba=next((a for a in abas if a in wb.sheetnames), None)
-        if aba is None: return []
-        rows=list(wb[aba].iter_rows(values_only=True));hi=0
-        for i,rw in enumerate(rows):
-            if rw and len([x for x in rw if x is not None])>=2: hi=i;break   # cabecalho = 1a linha com >=2 celulas
-        hdr=[(str(h).strip().lower().replace(" ","_").replace("-","_") if h is not None else None) for h in rows[hi]]
-        out=[]
-        for rw in rows[hi+1:]:
-            if rw is None or all(x is None for x in rw): continue
-            out.append({k:v for k,v in zip(hdr,rw) if k})
-        return out
+    def L(*nomes):
+        """A aba pelo primeiro nome que existir — a lista de alternativas cobre a grafia
+        com e sem acento, que difere entre as fontes."""
+        for n in nomes:
+            linhas = abas.get(n)
+            if linhas is not None: return linhas
+        return []
     def num(v,dv=0.0):
         try: return float(v)
         except: return dv
@@ -990,9 +897,17 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     fim_cid={_c:int(num(_d.get("data_fim_concessao"),0)) for _c,_d in cidop.items()}
     _sisop={d["sistema_id"]:d for d in L("sistema-operacional")}                       # compat: fim por sistema (bancos antigos)
     fim_sis={_s:int(num(_d.get("data_fim_concessao"),0)) for _s,_d in _sisop.items()}
-    subop={(d.get("sub_bacia") or d.get("subsistema_id")):d for d in L("subbacia-operacional","subsistema-operacional")}
+    # `dict(d)`, e nao `d`: ADIANTE ESTA FUNCAO ESCREVE nestas linhas — as colunas
+    # `*_novas_obras` sao derivadas por cima do que veio, e no modo sem CTS as colunas
+    # exclusivas recebem o valor consolidado. Sem a copia, quem chamou fica com o dicionario
+    # ALTERADO, e o `abas_fonte` do snapshot publicaria o dado JA DERIVADO como se fosse o
+    # input bruto — a auditoria passaria a mentir sobre a origem.
+    #
+    # Copia RASA e o bastante: os valores sao escalares, e o que nao pode ser compartilhado
+    # e o dicionario da linha.
+    subop={(d.get("sub_bacia") or d.get("subsistema_id")):dict(d) for d in L("subbacia-operacional","subsistema-operacional")}
     # ---- CTS (Coletor de Tempo Seco): estrutura irma da sub-bacia, pareada 1:1 pela aba subbacia-cts ----
-    _cts_op={d.get("cts"): d for d in L("cts-operacional") if d.get("cts")}
+    _cts_op={d.get("cts"): dict(d) for d in L("cts-operacional") if d.get("cts")}   # copia: ver `subop` acima
     _cts_dep={d.get("sub_bacia"): d.get("cts") for d in L("subbacia-cts") if d.get("sub_bacia") and d.get("cts")}
     _cts_ids_all=set(_cts_op)
     # ---- RECORTE DA COBERTURA: total x so residencial -----------------------------
@@ -1016,7 +931,11 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         # desfecho: a rodada responderia "so residencial" medindo todo mundo, e ninguem
         # notaria. Entao o modo se desliga com aviso alto, e o `milp_status` nao muda porque
         # o plano e o mesmo de uma rodada sem recorte.
-        _tem_res=sum(1 for _d in list(subop.values())+list(_cts_op.values())
+        # `_cts_op` so entra na conta quando a CTS ESTA na rodada. Sem ela, os dados dela
+        # nao sao lidos para nada — nem para diagnostico. Contar linhas que nao participam
+        # faria o recorte se dar por atendido com base em dado que ninguem vai usar.
+        _linhas_em_jogo=list(subop.values())+(list(_cts_op.values()) if usar_cts else [])
+        _tem_res=sum(1 for _d in _linhas_em_jogo
                      if _d.get("universo_ligacoes_residencial") not in (None,""))
         if not _tem_res:
             print("  [ALERTA] COBERTURA SO RESIDENCIAL pedida, mas o banco nao tem "
@@ -1024,7 +943,7 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                   "no TOTAL — o recorte NAO foi aplicado.")
             _cob_res=False
         else:
-            _falta=[_k for _k,_d in list(subop.items())+list(_cts_op.items())
+            _falta=[_k for _k,_d in (list(subop.items())+(list(_cts_op.items()) if usar_cts else []))
                     if _d.get("universo_ligacoes_residencial") in (None,"")]
             if _falta:
                 print(f"  [aviso] {len(_falta)} sub-bacia(s)/CTS sem coluna residencial: a cobertura delas "
@@ -1045,8 +964,9 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         """
         if not _cob_res: return False
         if (subop.get(_sbk) or {}).get(_COB_LIG[0]) in (None,""): return False
-        _u=str((cidop.get(sis_cid.get(sis_de_sb.get(_sbk))) or {}).get("unidade_cobertura") or "ligacoes")
-        return not _u.strip().lower().startswith("pop")
+        # A REGUA VEM DO PARAMETRO DA RODADA, e nao mais da cidade: ela e uma so
+        # para a unidade inteira, entao esta pergunta nao depende da sub-bacia.
+        return not str(unidade_cobertura or "ligacoes").strip().lower().startswith("pop")
     # ---- CTS DESLIGADA: o que a sub-bacia absorve ---------------------------------
     # As colunas de LIGACAO e ECONOMIA da sub-bacia sao o que pertence EXCLUSIVAMENTE a
     # ela. A CTS cobre uma area que se SOBREPOE a essa — e a sobreposicao e contada uma
@@ -1069,48 +989,47 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                       (_COB_LIG[1],"ligacoes_atuais_residencial_com_cts"),
                       (_COB_ECO[0],"universo_economias_residencial_com_cts"),
                       (_COB_ECO[1],"economias_atuais_residencial_com_cts")]
-    # O QUE CONTINUA SENDO SOMADO. Populacao, vazao e receita nao tem coluna consolidada
-    # na origem — entao seguem como sempre: a linha da CTS entra por soma. Onde houver
-    # sobreposicao real elas ficam com a dupla contagem que as de cima deixaram de ter, e
-    # isso e uma incoerencia CONHECIDA entre grandezas, nao um esquecimento. Vazao dobrada
-    # superdimensiona a ETE; e o preco de nao perder a demanda do coletor.
-    _CTS_SUM=["universo_populacao","populacao_atual","populacao_novas_obras",
-              "vazao_contribuicao","receita_faturada_media_mensal","receita_arrecadada_media_mensal"]
+    # NADA MAIS E SOMADO. Vazao, receita e populacao sao DADO da sub-bacia, e o motor nao
+    # inventa o valor delas para o cenario sem coletor: se desligar a CTS muda a vazao,
+    # quem atualiza a base e quem cadastra. A escolha de considerar ou nao a CTS nao mexe
+    # em receita.
+    #
+    # Era isto que a versao anterior fazia, e o defeito e visivel agora que as ligacoes
+    # deixaram de ser somadas: a linha da CTS entrava inteira em vazao/receita/populacao,
+    # enquanto as ligacoes vinham da coluna consolidada — duas moedas diferentes na mesma
+    # sub-bacia. Somar tambem contava a area sobreposta duas vezes.
+    #
+    # O QUE ISSO CUSTA, DECLARADO: sem o coletor, a vazao que a sub-bacia manda para a ETE
+    # e a que estiver na base dela. Se a base nao tiver sido atualizada para esse cenario,
+    # a ETE e dimensionada sem o esgoto que vinha pelo coletor.
+    _absorvidas=[]; _sem_consolidado=[]        # so o modo desligado preenche
     if usar_cts:                                   # LIGADO: CTS entra como no proprio (dados operacionais)
         for _c,_row in _cts_op.items(): subop[_c]=_row
-    else:                                          # DESLIGADO: a sub-bacia absorve a CTS pareada
-        _sem_consolidado=[]
+    else:                                          # DESLIGADO: a sub-bacia le as colunas consolidadas
+        # A UNICA DIFERENCA PARA A SUB-BACIA E QUAL COLUNA E LIDA. Nada e somado, nada e
+        # ponderado, nada e derivado: as oito colunas `*_com_cts` substituem as exclusivas
+        # e o resto da ficha — vazao, receita, populacao, potencial — fica como esta.
+        #
+        # Vazao, receita e populacao sao DADO da sub-bacia. Se desligar o coletor muda a
+        # vazao dela, quem atualiza a base e quem cadastra; o motor nao arbitra o numero.
+        # E a escolha nao mexe em receita.
+        # As duas listas sao do BANCO INTEIRO — `subop` so e filtrado pela unidade mais
+        # adiante. Elas viram aviso la embaixo, ja recortadas por `cen.nos`: dizer "337
+        # sub-bacias" numa unidade que tem 186 (ou nenhuma) e ruido que ensina a ignorar
+        # aviso. A linha `[info] CTS:` ao lado sempre fez esse recorte certo.
         for _sb,_c in _cts_dep.items():
             if _sb not in subop or _c not in _cts_op: continue
-            _s=subop[_sb]; _k=_cts_op[_c]
-            _us=num(_s.get("universo_ligacoes")); _uc=num(_k.get("universo_ligacoes"))
-            _ps=num(_s.get("potencial_crescimento"),1.0); _pk=num(_k.get("potencial_crescimento"),1.0)
-            # POTENCIAL: media ponderada pelo que a sub-bacia PASSA A ATENDER.
-            #
-            # Com a coluna consolidada o peso da parte que vem do coletor e a
-            # SOBREPOSICAO (consolidado - exclusiva), e nao o universo inteiro da CTS: a
-            # area que so ela alcancava nao e atendida por ninguem, e nao deve pesar num
-            # potencial que multiplica um universo do qual ela nao faz parte.
-            #
-            # Sem a coluna, o peso continua sendo o universo da CTS, que e o que a soma
-            # de fato incorpora — e e o que preserva o total entre ligado e desligado.
-            _cons=num(_s.get(_CTS_CONSOLIDADO[0][1])) if _s.get(_CTS_CONSOLIDADO[0][1]) not in (None,"") else None
-            _peso=(max(0.0,_cons-_us) if _cons is not None else _uc)
-            if _us+_peso>1e-9: _s["potencial_crescimento"]=(_us*_ps+_peso*_pk)/(_us+_peso)
-            for _f in _CTS_SUM: _s[_f]=num(_s.get(_f))+num(_k.get(_f))
-            # SEM A COLUNA CONSOLIDADA, volta a somar. E a degradacao honesta: perder a
-            # demanda da CTS seria pior que conta-la duas vezes, e o aviso diz qual dos
-            # dois comportamentos a rodada teve.
+            _s=subop[_sb]
             if _s.get(_CTS_CONSOLIDADO[0][1]) in (None,""):
+                # SEM A COLUNA nao ha o que ler, e o motor NAO inventa: fica a exclusiva.
+                # A versao anterior somava a linha da CTS aqui, e era isso que contava a
+                # area sobreposta duas vezes. Base que ainda nao tem a coluna produz uma
+                # rodada sem CTS que ignora a demanda do coletor — e o aviso diz isso.
                 _sem_consolidado.append(_sb)
-                for _exc,_ in _CTS_CONSOLIDADO: _s[_exc]=num(_s.get(_exc))+num(_k.get(_exc))
                 continue
             for _exc,_tot in _CTS_CONSOLIDADO:
                 if _s.get(_tot) not in (None,""): _s[_exc]=num(_s.get(_tot))
-        if _sem_consolidado:
-            print(f"  [aviso] {len(_sem_consolidado)} sub-bacia(s) com CTS pareada mas sem "
-                  f"`universo_ligacoes_com_cts`: a demanda foi SOMADA, o que conta a area "
-                  f"sobreposta duas vezes. Ex.: {_sem_consolidado[:3]}")
+        _absorvidas=[_sb for _sb,_c in _cts_dep.items() if _sb in subop and _c in _cts_op]
     # ---- UNIDADES ----------------------------------------------------------------
     # LIGACOES e ECONOMIAS vem SEMPRE da base comercial (Databricks) para toda sub-bacia.
     # POPULACAO e opcional e entra por input do usuario, quando precisa.
@@ -1313,6 +1232,12 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         eo.wacc_origem=("proprio" if (d.get("wacc") is not None and str(d.get("wacc")).strip()!="")
                         else ("wacc_medio" if eo.wacc is not None else "ausente"))
         eo.cap_modulo=num(d.get("capacidade_por_modulo"),0.0)   # vazao por modulo
+        # A UNIDADE DA CAPACIDADE VEM DO CADASTRO, e nao e fixada aqui. A soma nao muda
+        # com ela — o que muda e como o numero se le, e trocar a unidade de medida no
+        # cadastro nao pode exigir mexer no motor nem na tela. Vazia = a rodada nao
+        # declarou unidade, e quem mostra o numero mostra sem sufixo, em vez de inventar.
+        eo.unidade_capacidade=(str(d.get("unidade_capacidade")).strip()
+                               if str(d.get("unidade_capacidade") or "").strip() else None)
         eo.capex_modulo=num(d.get("capex_por_modulo"),0.0)      # CAPEX por modulo
         _oc=d.get("capacidade_ociosa")                                    # CAPACIDADE OCIOSA = nominal - vazao de operacao
         _nom=d.get("capacidade_nominal_atual"); _opv=d.get("vazao_de_operacao_atual")
@@ -1395,12 +1320,29 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     cen.orc_janela_total={_rg:sum(cen.orc[_rg][:int(cen.anos_capex)]) for _rg in cen.regionais}  # sobra acumulada da janela custeia o rabo
     cen.ete_fixo=bool(ete_fixo); cen.ete_faseada=bool(ete_faseada)
     # --- COBERTURA (ligacoes TRATADAS) por SISTEMA: total possivel e base atual ---
-    # --- UNIDADE DE COBERTURA por CIDADE (coluna 'unidade_cobertura' em cidade-operacional):
-    #     ligacoes (default) | economias | populacao. Converte universo/base/incrementos por densidade.
-    _unid={}
-    for _c,_d in cidop.items():
-        _u=str(_d.get("unidade_cobertura") or "ligacoes").strip().lower()
-        _unid[cid_name.get(_c,_c)]=("economias" if _u.startswith("econ") else ("populacao" if _u.startswith("pop") else "ligacoes"))
+    # --- UNIDADE DE COBERTURA: PARAMETRO DA RODADA, e nao mais coluna do cadastro.
+    #
+    #     ligacoes (default) | economias | populacao. Converte universo/base/incrementos
+    #     por densidade.
+    #
+    #     ERA `cidade_operacional.unidade_cobertura`, uma regua por CIDADE. Nao e dado
+    #     de cadastro: e a lente com que se OLHA o mesmo cadastro, e por isso mudou de
+    #     lugar. Vale para a unidade inteira — comparar dois planos da mesma unidade
+    #     medidos em reguas diferentes por cidade nao respondia pergunta nenhuma.
+    #
+    #     O DICIONARIO POR CIDADE FICA, com o mesmo valor em todas: o resto do motor
+    #     (CP-SAT, dashboard, publicacao) le `cen.unidade_cobertura[cidade]`, e trocar a
+    #     forma obrigaria a mexer em tudo isso para nao ganhar nada.
+    _u=str(unidade_cobertura or "ligacoes").strip().lower()
+    _u=("economias" if _u.startswith("econ") else ("populacao" if _u.startswith("pop") else "ligacoes"))
+    # SOBRE `cid_name`, E NAO SOBRE `cidop`: a regua e da RODADA, entao vale para
+    # toda cidade do cenario — inclusive a que nao tem linha em
+    # `cidade_operacional`. Enquanto era coluna daquela tabela, montar o
+    # dicionario a partir dela era natural; agora seria um buraco: a cidade sem
+    # ficha entraria no cenario, apareceria nos nos, e a publicacao gravaria
+    # `unidade_cobertura` NULO para ela — uma linha de resultado sem dizer em que
+    # moeda foi medida.
+    _unid={_nm:_u for _nm in cid_name.values()}
     _ufat={}; _sem_pop=[]
     for _sb2,_sis2 in sis_de_sb.items():
         _cn2=cid_name[sis_cid[_sis2]]; _u2=_unid.get(_cn2,"ligacoes"); _so2=subop.get(_sb2,{})
@@ -1560,4 +1502,16 @@ def ler_banco(path, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         # coluna consolidada. Log que descreve o codigo antigo e pior que log nenhum.
         print(f"  [info] CTS: {len(_cts_na_uni)} nesta unidade ({len(_cts_ids_all)} no banco) -> usar_cts={usar_cts} "
               f"({'entram como nos proprios' if usar_cts else 'a sub-bacia absorve a pareada (colunas *_com_cts)'})")
+    # RECORTADOS PELA UNIDADE. `cen.nos` e o mesmo filtro que a linha acima usa — sem ele
+    # o aviso falaria do banco inteiro, inclusive numa unidade sem CTS nenhuma.
+    _abs_uni=[_sb for _sb in _absorvidas if _sb in cen.nos]
+    _sem_uni=[_sb for _sb in _sem_consolidado if _sb in cen.nos]
+    if _abs_uni:
+        print(f"  [aviso] {len(_abs_uni)} sub-bacia(s) desta unidade com CTS pareada: sem o coletor, "
+              f"VAZAO, RECEITA e POPULACAO usadas sao as da BASE DA SUB-BACIA — a linha da CTS nao "
+              f"entra. Se desligar o coletor muda a vazao, a base precisa refletir isso.")
+    if _sem_uni:
+        print(f"  [ALERTA] {len(_sem_uni)} sub-bacia(s) desta unidade com CTS pareada mas SEM "
+              f"`universo_ligacoes_com_cts`: a rodada sem coletor usou o universo EXCLUSIVO delas, "
+              f"ou seja, ignorou a area sobreposta. Ex.: {_sem_uni[:3]}")
     return cen

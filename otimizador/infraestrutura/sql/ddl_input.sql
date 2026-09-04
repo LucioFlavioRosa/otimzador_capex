@@ -23,36 +23,89 @@ CREATE SCHEMA IF NOT EXISTS controle;
 
 -- ---- HIERARQUIA -----------------------------------------------------------
 -- aba do motor: unidade-regional
+-- A DIRETORIA e o nivel entre a regional e a unidade. A hierarquia inteira e
+-- regional -> diretoria -> unidade -> empresa -> cidade -> sistema, e a fonte a
+-- traz nesta ordem (colunas REGIONAL, DIRETORIA, UNIDADE, EMP_CODIGO, EMPRESA,
+-- CIDADE do extrato de portfolio).
+--
+-- SEM ID PROPRIO NA FONTE: ela traz o NOME da diretoria, como traz o da
+-- regional. O id e derivado na carga, e por isso a tabela nao o gera sozinha.
+--
+-- `regional_id` SEM CHAVE ESTRANGEIRA, e nao por descuido: `input.regional` nao
+-- e criada por este arquivo — ela vive nas migracoes do SERVICO. E a mesma razao
+-- pela qual `unidade_regional.regional_id` logo abaixo tambem e `text` solto. Um
+-- REFERENCES aqui faria este DDL falhar em banco novo, que e onde ele mais serve.
+CREATE TABLE IF NOT EXISTS input.diretoria (
+    diretoria_id   text PRIMARY KEY,
+    diretoria_name text,
+    regional_id    text NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_diretoria_regional ON input.diretoria (regional_id);
+
+-- `usa_macrorregiao_cts` e da REGIONAL, e nao do Databricks: marcado, CADA sistema da
+-- unidade aceita UMA CTS; desmarcado, aceitam varias. Regra de cadastro — o
+-- motor ignora, porque para ele uma ou duas CTS sao nos como quaisquer outros.
+--
+-- ESTAVA EM `cidade_sistema`, uma linha por sistema, ate a migracao 016 do
+-- servico. A decisao e da unidade: quem opera decide uma vez e vale para todos os
+-- sistemas dentro dela.
 CREATE TABLE IF NOT EXISTS input.unidade_regional (
-    unidade_id    text PRIMARY KEY,
-    unidade_name  text,
-    regional_id   text NOT NULL,
-    regional_name text,
-    wacc_medio    double precision
+    unidade_id      text PRIMARY KEY,
+    unidade_name    text,
+    regional_id     text NOT NULL,
+    regional_name   text,
+    -- NULAVEL: a carga pode trazer a unidade antes da diretoria dela, e um NOT
+    -- NULL faria a carga inteira falhar por um nivel que ainda nao chegou.
+    -- `diretoria_name` fica desnormalizado aqui pela mesma razao que
+    -- `regional_name`: a leitura do cadastro monta a arvore numa consulta so.
+    diretoria_id    text REFERENCES input.diretoria(diretoria_id),
+    diretoria_name  text,
+    wacc_medio      double precision,
+    usa_macrorregiao_cts boolean NOT NULL DEFAULT false
 );
 
--- aba do motor: regional-superintendencia
-CREATE TABLE IF NOT EXISTS input.regional_superintendencia (
-    superintendencia_id   text PRIMARY KEY,
-    superintendencia_name text,
-    unidade_id            text NOT NULL
-        REFERENCES input.unidade_regional(unidade_id)
+CREATE INDEX IF NOT EXISTS ix_unidade_diretoria
+  ON input.unidade_regional (diretoria_id);
+
+-- HIERARQUIA v8: a EMPRESA OPERADORA no lugar da superintendencia.
+--
+-- A superintendencia era um nivel de reserva que fonte nenhuma trazia. A v8 a substituiu
+-- pela empresa, que e real e vem do de-para, e partiu o antigo `superintendencia_cidade`
+-- em duas: o municipio passa a existir por si (`cidade`) e o vinculo fica em
+-- `cidade_empresa`.
+--
+-- O MOTOR NAO MUDOU DE VOCABULARIO: ele ainda le as abas `regional-superintendencia` e
+-- `superintendencia-cidade`. Quem traduz e `carregar_postgres.ABAS_INPUT`, com um `AS`
+-- que projeta `emp_codigo` como `superintendencia_id`. As tabelas aqui sao as do
+-- CADASTRO; as abas sao o que o motor pede.
+CREATE TABLE IF NOT EXISTS input.empresa (
+    emp_codigo         text PRIMARY KEY,
+    empresa            text,
+    unidade_id         text NOT NULL
+        REFERENCES input.unidade_regional(unidade_id),
+    data_fim_concessao integer
 );
 
--- aba do motor: superintendencia-cidade
-CREATE TABLE IF NOT EXISTS input.superintendencia_cidade (
-    cidade_id           text PRIMARY KEY,
-    cidade_name         text,
-    superintendencia_id text NOT NULL
-        REFERENCES input.regional_superintendencia(superintendencia_id)
+CREATE TABLE IF NOT EXISTS input.cidade (
+    cidade_id   text PRIMARY KEY,
+    cidade_name text
+);
+
+CREATE TABLE IF NOT EXISTS input.cidade_empresa (
+    cidade_id  text PRIMARY KEY REFERENCES input.cidade(cidade_id),
+    emp_codigo text NOT NULL REFERENCES input.empresa(emp_codigo)
 );
 
 -- aba do motor: cidade-sistema
+--
+-- `usa_sistema_cts` SAIU DAQUI: a decisao passou a ser da unidade (ver
+-- `unidade_regional` acima), e vale para todos os sistemas dentro dela.
 CREATE TABLE IF NOT EXISTS input.cidade_sistema (
     sistema_id   text PRIMARY KEY,
     sistema_name text,
     cidade_id    text NOT NULL
-        REFERENCES input.superintendencia_cidade(cidade_id)
+        REFERENCES input.cidade(cidade_id)
 );
 
 -- aba do motor: sistema-topologia
@@ -60,25 +113,31 @@ CREATE TABLE IF NOT EXISTS input.cidade_sistema (
 -- por id GLOBAL — `self.nos = {n.id: n for n in nos}` (otimizador_capex_v62.py:63). Um id
 -- repetido em outro sistema seria aceito pelo banco e o motor manteria so o ultimo,
 -- perdendo um no inteiro em silencio.
+--
+-- `sistema_id` ACEITA NULO: componente cadastrado e ainda nao colocado em sistema
+-- nenhum. Do Databricks vem quais sub-bacias e qual ETE sao do sistema, e todas as
+-- CTS — em que sistema cada CTS entra, e o caminho ate a ETE, quem monta e a
+-- Regional. O motor pula essas linhas sozinho (`sistema_id not in sis_cid`).
 CREATE TABLE IF NOT EXISTS input.sistema_topologia (
     componente_sistema_id         text PRIMARY KEY,
     componente_sistema_nome       text,
-    sistema_id                    text NOT NULL
+    sistema_id                    text
         REFERENCES input.cidade_sistema(sistema_id),
     componente_sistema_id_jusante text
 );
 
 -- ---- OPERACIONAL ----------------------------------------------------------
 -- aba do motor: cidade-operacional
+-- `unidade_cobertura` SAIU desta tabela (migracao 019 do servico). A regua da
+-- cobertura — ligacoes | economias | populacao — nao e dado de cadastro: e a
+-- LENTE com que se olha o mesmo cadastro, e virou parametro de rodada
+-- (`UNIDADE_COBERTURA`), valendo para a unidade inteira. Duas cidades da mesma
+-- unidade medidas em reguas diferentes nao respondiam pergunta nenhuma.
 CREATE TABLE IF NOT EXISTS input.cidade_operacional (
     cidade_id          text PRIMARY KEY
-        REFERENCES input.superintendencia_cidade(cidade_id),
-    data_fim_concessao integer,
-    unidade_cobertura  text
+        REFERENCES input.cidade(cidade_id),
+    data_fim_concessao integer
 );
-COMMENT ON COLUMN input.cidade_operacional.unidade_cobertura IS
-    'ligacoes | economias | populacao. Define a REGUA da meta e da faixa de paridade '
-    'daquela cidade. A receita continua sempre em ligacoes.';
 
 -- aba do motor: subbacia-operacional
 CREATE TABLE IF NOT EXISTS input.subbacia_operacional (
@@ -125,8 +184,8 @@ COMMENT ON COLUMN input.subbacia_operacional.ligacoes_atuais_residencial IS
     'Residenciais JA atendidas. Com COBERTURA_SO_RESIDENCIAL=True e a base da meta; o '
     'total continua sendo quem paga a receita.';
 COMMENT ON COLUMN input.subbacia_operacional.universo_economias_residencial IS
-    'Universo de economias residenciais. Usada quando a cidade mede cobertura em '
-    'economias (input.cidade_operacional.unidade_cobertura).';
+    'Universo de economias residenciais. Usada quando a rodada mede cobertura em '
+    'economias (parametro UNIDADE_COBERTURA).';
 COMMENT ON COLUMN input.subbacia_operacional.economias_atuais_residencial IS
     'Economias residenciais ja atendidas. O RECORTE ACABA NA COBERTURA: receita, VPL, '
     'vazao e CAPEX seguem no total em qualquer modo. Cidade que mede em POPULACAO ignora '
@@ -160,6 +219,11 @@ COMMENT ON COLUMN input.componentes_subbacias_capex.capex IS
 CREATE TABLE IF NOT EXISTS input.ete_capex (
     ete_id                   text PRIMARY KEY,
     capacidade_por_modulo    double precision,
+    -- A unidade em que `capacidade_por_modulo` e as demais capacidades desta ETE estao
+    -- expressas. NAO e fixa no codigo de proposito: trocar a unidade de medida e mudanca
+    -- de cadastro, e a soma nao muda com ela — so a leitura do numero. Vazia = a tela
+    -- mostra a quantidade sem sufixo, em vez de inventar uma unidade.
+    unidade_capacidade       text,
     capex_por_modulo         double precision,
     opex_por_modulo          double precision,
     tempo_predecessoras      integer,
@@ -185,9 +249,14 @@ CREATE TABLE IF NOT EXISTS input.regional_operacional (
 -- FALLBACK do teto de CAPEX quando ORCAMENTO nao vem no run_request. Sem esta tabela
 -- E sem o parametro, o motor usa INF: no caminho do solver isso estoura la dentro do
 -- CP-SAT com "OverflowError: cannot convert float infinity to integer".
+-- A CHAVE E (regional_id, ano), e nao so `regional_id`: o teto de CAPEX e por ANO, e uma
+-- chave sem ano so consegue guardar um valor por regional — o cronograma inteiro caberia
+-- numa linha so, e a ultima gravacao apagaria as outras.
 CREATE TABLE IF NOT EXISTS input.orcamento (
-    regional_id text PRIMARY KEY,
-    valor_ano   double precision NOT NULL
+    regional_id text NOT NULL,
+    ano         integer NOT NULL,
+    valor_ano   double precision NOT NULL,
+    PRIMARY KEY (regional_id, ano)
 );
 
 -- ---- METAS E PARIDADE -----------------------------------------------------
@@ -268,8 +337,8 @@ CREATE TABLE IF NOT EXISTS input.componentes_cts_capex (
 
 -- ---- INDICES que o backend/front consultam --------------------------------
 CREATE INDEX IF NOT EXISTS ix_unidade_regional ON input.unidade_regional (regional_id);
-CREATE INDEX IF NOT EXISTS ix_sup_unidade      ON input.regional_superintendencia (unidade_id);
-CREATE INDEX IF NOT EXISTS ix_cidade_sup       ON input.superintendencia_cidade (superintendencia_id);
+CREATE INDEX IF NOT EXISTS ix_empresa_unidade  ON input.empresa (unidade_id);
+CREATE INDEX IF NOT EXISTS ix_cidade_empresa   ON input.cidade_empresa (emp_codigo);
 CREATE INDEX IF NOT EXISTS ix_sistema_cidade   ON input.cidade_sistema (cidade_id);
 CREATE INDEX IF NOT EXISTS ix_topo_sistema     ON input.sistema_topologia (sistema_id);
 CREATE INDEX IF NOT EXISTS ix_topo_jusante     ON input.sistema_topologia (componente_sistema_id_jusante);

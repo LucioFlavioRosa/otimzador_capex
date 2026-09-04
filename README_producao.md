@@ -31,18 +31,18 @@ tests/                   suíte de regressão
 |---|---|---|
 | **domínio** | `otimizador/dominio/otimizador_capex_v62.py` | carga do banco, modelo, `avaliar`. Sem I/O. |
 | **domínio** | `otimizador/dominio/otimizador_capex_cpsat63.py` | solver OR-Tools (geração de colunas por cidade) |
-| **domínio** (Fase 3) | `otimizador/dominio/qualidade.py` | portão por rodada, antes de publicar |
+| **domínio** | `otimizador/dominio/qualidade.py` | portão por rodada, antes de publicar |
 | **domínio** | `otimizador/dominio/contrato_resultado.py` | as 14 tabelas publicadas, PKs e índices |
-| **aplicação** (Fase 4) | `otimizador/aplicacao/job_databricks.py` | orquestração fim-a-fim |
+| **aplicação** | `otimizador/aplicacao/job_databricks.py` | orquestração fim-a-fim |
 | **aplicação** | `otimizador/aplicacao/experimentos_local.py` | rodadas locais (`main.py experimento`) |
 | **infraestrutura** | `otimizador/infraestrutura/persistencia.py` | materializa a rodada em 14 tabelas `run_*` |
 | **infraestrutura** | `otimizador/infraestrutura/publicacao.py` | DDL de resultado, escrita idempotente, status, diagnóstico |
-| **infraestrutura** (Fase 2) | `otimizador/infraestrutura/carregar_postgres.py` | Postgres (input) → **Cenário** (reusa o motor) |
-| **infraestrutura** (Fase 1) | `otimizador/infraestrutura/sql/ddl_input.sql` | tabelas de input + controle |
+| **infraestrutura** | `otimizador/infraestrutura/carregar_postgres.py` | Postgres (input) → **Cenário** (reusa o motor) |
+| **infraestrutura** | `otimizador/infraestrutura/sql/ddl_input.sql` | tabelas de input + controle |
 | **infraestrutura** | `otimizador/infraestrutura/sql/ddl_resultado.sql` | `public.otim_*` — gerado por `main.py gerar-ddl` |
 | **apresentação** | `otimizador/apresentacao/leitor_v2.py` | como o front reconstrói as telas (lado de consumo) |
 | **apresentação** | `otimizador/apresentacao/dashboard_otimizador_v2.py` | usado pela persistência (explicabilidade) |
-| **Docs** | `Plano_Producao_Databricks.md` | arquitetura e fases (histórico) |
+| **Docs** | `docs/` | os sete documentos do pacote; `docs/historico/` guarda plano e revisão antigos |
 
 ## Ordem do fluxo (uma rodada)
 
@@ -123,13 +123,13 @@ rodar(run_id=dbutils.widgets.get("run_id"),
 
 ```bash
 pip install -r requirements-prod.txt
-pytest tests/            # 127 testes: 114 passed, 13 skipped (os de solver/Postgres pulam sozinhos)
+pytest tests/            # 127 testes: 114 passed, 13 skipped (12 pedem Postgres, 1 é a suíte legada)
 ```
 
 `tests/test_producao.py` cobre a camada de produção (tradução de `run_request.params`, portão
-de qualidade, propagação do `run_id`) sem precisar de Postgres. O achado mais caro da revisão —
-`ete_faseada`/`foco_cobertura` com default do job divergindo do motor — tem teste dedicado que
-compara o mapa de parâmetros com `inspect.signature(ler_banco)`.
+de qualidade, propagação do `run_id`) sem precisar de Postgres. Um teste dedicado compara o mapa
+de parâmetros do job com `inspect.signature(ler_banco)`: default do job que divirja do motor faz
+a mesma rodada render planos diferentes aqui e no notebook.
 
 ### Smoke test contra um Postgres de verdade
 

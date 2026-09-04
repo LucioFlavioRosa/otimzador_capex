@@ -72,6 +72,10 @@ TIPOS_FIXOS = {"data_hora": "TIMESTAMPTZ", "milp_bound": "DOUBLE PRECISION",
                "ete_nova": "BOOLEAN",                         # bool(e.nova) em persistencia
                # (as fixtures nao tem ETE, entao a coluna sai toda nula e seria inferida
                #  TEXT; o front compararia string em vez de booleano)
+               # TEXT declarado: quando nenhuma ETE informa a unidade a coluna sai toda
+               # nula, e a inferencia a criaria com outro tipo — o mesmo motivo do
+               # `ete_nova` logo acima.
+               "unidade_capacidade": "TEXT",
                "capex_modulo": "DOUBLE PRECISION", "capex_terreno": "DOUBLE PRECISION",
                "capex_modulos_construidos": "DOUBLE PRECISION"}   # sum(m.capex ...)
 # colunas de servico que o front consome e que nao vem do engine

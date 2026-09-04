@@ -1,10 +1,9 @@
 """Nucleo do otimizador — regras que precisam continuar valendo depois de qualquer mudanca:
 perfil de OPEX, CAPEX = quantidade x preco, regra do WACC, janela de conclusao, leitura estrita
 de nomes de coluna e (com solver) teto de orcamento e separabilidade por cidade."""
-import shutil
 import pytest
 from _helpers import (engine, load_cts, load_fixture, build_all, capex_total,
-                      silent, solver_or_skip, BANK_CTS, ORC_SLACK)
+                      silent, solver_or_skip, BANK_CTS, ORC_SLACK, banco)
 
 
 # ---------------------------------------------------------------- OPEX
@@ -56,25 +55,19 @@ def test_wacc_vazio_consome_o_wacc_medio_da_unidade():
 def test_anos_extra_conclusao_configura_a_cauda():
     M = engine()
     assert load_cts(True).anos_extra == 3, "default de anos_extra_conclusao deve ser 3"
-    cen0 = silent(M.ler_banco, BANK_CTS, orcamento=ORC_SLACK, usar_cts=True, anos_extra_conclusao=0)
+    cen0 = silent(M.ler_banco, banco(BANK_CTS), orcamento=ORC_SLACK, usar_cts=True, anos_extra_conclusao=0)
     assert cen0.anos_extra == 0
     assert cen0.orc_janela_total, "a sobra da janela (carry-forward) precisa estar disponivel"
 
 
 # ---------------------------------------------------------------- leitura ESTRITA de nomes
-def test_sem_fallback_para_nome_de_coluna_errado(tmp_path):
-    import openpyxl
+def test_sem_fallback_para_nome_de_coluna_errado():
     M = engine()
     correto = sum(load_cts(True).vazao.values())
-    dst = tmp_path / "quebrado.xlsx"
-    shutil.copy(BANK_CTS, dst)
-    wb = openpyxl.load_workbook(dst)
-    ws = wb["subbacia-operacional"]
-    for c in ws[1]:
-        if c.value == "vazao_contribuicao":
-            c.value = "vazao_marginal"      # nome ANTIGO/errado
-    wb.save(dst)
-    quebrado = sum(silent(M.ler_banco, str(dst), orcamento=ORC_SLACK, usar_cts=True).vazao.values())
+    abas = banco(BANK_CTS)
+    for linha in abas["subbacia-operacional"]:
+        linha["vazao_marginal"] = linha.pop("vazao_contribuicao")   # nome ANTIGO/errado
+    quebrado = sum(silent(M.ler_banco, abas, orcamento=ORC_SLACK, usar_cts=True).vazao.values())
     assert quebrado != pytest.approx(correto), \
         "o nome antigo NAO pode ser aceito como alias (regra: sem fallback)"
 
@@ -85,7 +78,7 @@ def test_solver_respeita_o_teto_anual():
     CP = solver_or_skip()
     M = engine()
     orc = {2026: 2e6, 2027: 2e6, 2028: 2e6, 2029: 2e6}     # apertado de proposito
-    cen = silent(M.ler_banco, BANK_CTS, orcamento=orc, usar_cts=True)
+    cen = silent(M.ler_banco, banco(BANK_CTS), orcamento=orc, usar_cts=True)
     res = silent(CP.resolver_por_sistema, cen, max_time_s=60, workers=4)
     ok, viol = M.auditar_orcamento(cen, res)
     assert ok, f"o solver estourou o teto anual: {viol}"
