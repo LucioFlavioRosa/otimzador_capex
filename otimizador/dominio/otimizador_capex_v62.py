@@ -222,82 +222,32 @@ def _pv_custo(cen,o,start):
     elif start<Hm:
         v-=o.capex/(1.0+tx)**(start//12)
     return v   # OPEX nao entra aqui: caminha com a RECEITA (ver avaliar)
-def _vazao_por_obra(cen):
-    """VAZAO total das sub-bacias (coletas) que EXIGEM cada obra — topologico, independe de
-    plano/necessaria. Base para RATEAR por vazao o CAPEX de obras COMPARTILHADAS (transporte a
-    jusante e a ETE), evitando super-ponderar a mesma obra no WACC de varias sub-bacias.
-    vpo[r.id] = Sum(vazao das sub-bacias cujo caminho ate a ETE exige r)."""
-    m=getattr(cen,"_vazao_por_obra_cache",None)
-    if m is not None: return m
-    by_rede={}; by_transp={}
-    for o in cen.obras.values():
-        if o.tipo=="rede": by_rede.setdefault(o.no,[]).append(o.id)
-        elif o.tipo=="transporte": by_transp.setdefault(o.no,[]).append(o.id)
-    m={}
-    for c in cen.coletas:
-        vz=cen.vazao.get(c.no,0.0); X=c.no
-        ids=[c.id]+by_rede.get(X,[])
-        for n in caminho(cen,X): ids+=by_transp.get(n,[])
-        sis=cen.nos[X].sistema
-        if sis in cen.ete_do_sistema: ids.append(cen.ete_do_sistema[sis].id)   # ETE: compartilhada por todo o sistema
-        for rid in ids: m[rid]=m.get(rid,0.0)+vz
-    cen._vazao_por_obra_cache=m
-    return m
-
-def _ete_share(cen):
-    """CAPEX da ETE (modulos de EXPANSAO) rateado por sub-bacia, para pesar no WACC da receita.
-    Regra da FOLGA: a capacidade ociosa e consumida pelas sub-bacias de MENOR VAZAO primeiro (elas
-    NAO pagam a ETE); so o fluxo ACIMA da folga rateia os modulos novos. Plano-independente (usa o
-    POTENCIAL cheio: todas as sub-bacias do sistema), para o solver ter coeficientes fixos.
-    Retorna {sub-bacia: (capex_ete_rateado, wacc_ete)}; a soma dos rateios = CAPEX total da ETE."""
-    m=getattr(cen,"_ete_share_cache",None)
-    if m is not None: return m
-    m={}; syssub={}
-    for sb,no in cen.nos.items(): syssub.setdefault(no.sistema,[]).append(sb)
-    for sis,subs in syssub.items():
-        e=cen.ete_do_sistema.get(sis)
-        if e is None: continue
-        wacc_e=getattr(e,"wacc",None)
-        if wacc_e is None: continue
-        vz={sb:cen.vazao.get(sb,0.0) for sb in subs}; Sv=sum(vz.values())
-        if Sv<=0: continue
-        cap_mod=getattr(e,"cap_modulo",0.0) or 0.0; capex_mod=getattr(e,"capex_modulo",0.0) or 0.0
-        if getattr(e,"nova",False):
-            folga=0.0; capex_tot=getattr(e,"capex_terreno",0.0)+getattr(e,"modulos",0)*capex_mod
-        else:
-            folga=getattr(e,"folga",0.0) or 0.0
-            _exc=max(0.0,Sv-folga)
-            n=int(math.ceil(_exc/cap_mod)) if (_exc>1e-9 and cap_mod>0) else (1 if _exc>1e-9 else 0)
-            capex_tot=n*capex_mod
-        excess=max(0.0,Sv-folga)
-        if excess<=1e-9 or capex_tot<=0:                 # tudo cabe na folga -> ETE nao pesa
-            for sb in subs: m[sb]=(0.0,wacc_e)
-            continue
-        cum=0.0
-        for sb in sorted(subs,key=lambda s:vz[s]):        # MENOR VAZAO PRIMEIRO consome a folga
-            v=vz[sb]; hi=cum+v
-            pay=min(v,max(0.0, hi-max(cum,folga)))        # parte de v ACIMA da folga
-            m[sb]=(capex_tot*(pay/excess), wacc_e); cum=hi
-    cen._ete_share_cache=m
-    return m
-
 def _wacc_receita(cen,o):
-    """WACC que desconta a RECEITA de uma sub-bacia = media dos WACCs das obras NECESSARIAS,
-    ponderada pelo CAPEX RATEADO POR VAZAO. Transporte compartilhado a jusante: fatia = vazao(o)/
-    Sum(vazao das que exigem a obra). ETE: entra pelos MODULOS DE EXPANSAO (v30), rateados com a
-    folga consumida por MENOR VAZAO primeiro (ver _ete_share). Obra local -> CAPEX cheio.
-    Terceiros (capex 0) nao pesam. Sem CAPEX na cadeia -> WACC da propria ligacao."""
-    vpo=_vazao_por_obra(cen); vz_o=cen.vazao.get(o.no,0.0)
+    """WACC que desconta a RECEITA de uma sub-bacia = media dos WACCs das obras DELA,
+    ponderada pelo CAPEX de cada uma.
+
+    SO AS OBRAS DA PROPRIA SUB-BACIA (`r.no == o.no`): a ligacao, a rede e o transporte
+    ancorado NELA. O transporte a jusante e a ETE ficam de fora — eles pertencem ao
+    caminho, e nao a esta sub-bacia.
+
+    Ate 10/09/2026 a media era sobre a CADEIA INTEIRA ate a ETE, com rateio por vazao para
+    a parte compartilhada. O efeito era que o custo de capital de uma sub-bacia dependia de
+    QUEM ESTAVA A JUSANTE dela: duas sub-bacias identicas, em sistemas diferentes,
+    descontavam a receita a taxas diferentes por causa de troncos e de uma ETE que nenhuma
+    das duas paga sozinha. O WACC e o custo do financiamento das obras DAQUELA sub-bacia, e
+    e assim que ele passa a ser lido.
+
+    O RATEIO POR VAZAO CONTINUA EXISTINDO, em `vpl_por_subbacia` e no que se publica em
+    `otim_dependencia`: la ele responde outra pergunta — quanto do CUSTO de uma obra
+    compartilhada cabe a cada quem escoa por ela. Custo se rateia; desconto, nao.
+
+    Terceiros (capex 0) nao pesam. Sub-bacia sem CAPEX proprio -> WACC da propria ligacao."""
     num=den=0.0
     for r in requisitos(cen,o):
-        if getattr(r,"tipo","")=="ete": continue          # ETE tratada a parte (com folga) em _ete_share
+        if getattr(r,"no",None)!=o.no: continue           # transporte a jusante e ETE: nao sao dela
         cx=getattr(r,"capex",0.0) or 0.0
         if cx<=0: continue
-        tot=vpo.get(r.id,0.0)
-        frac=(vz_o/tot) if tot>0 else 1.0                 # obra local: tot==vz_o -> frac=1 (CAPEX cheio)
-        cxa=cx*frac; num+=cxa*cen.taxa_de(r); den+=cxa
-    esh=_ete_share(cen).get(o.no)                          # fatia da ETE (modulos de expansao, com folga)
-    if esh and esh[0]>0: num+=esh[0]*esh[1]; den+=esh[0]
+        num+=cx*cen.taxa_de(r); den+=cx
     return (num/den) if den>0 else cen.taxa_de(o)
 def _fator_esgoto_ano(cen,o):
     """Fator de equivalencia ESGOTO/AGUA por ANO (indice interno) da cidade da sub-bacia.
@@ -586,14 +536,19 @@ def avaliar(cen,plano):
 def vpl_por_subbacia(cen,res):
     """Decompoe o VPL do plano por SUB-BACIA, com RATEIO POR VAZAO das obras COMPARTILHADAS
     (transporte a jusante e modulos de ETE): cada sub-bacia paga a fatia do custo proporcional ao
-    esgoto que manda por aquela obra — as MESMAS fracoes ja usadas na ponderacao do WACC.
+    esgoto que manda por aquela obra.
+
+    O RATEIO AQUI E DE CUSTO, e nao de WACC — as duas coisas descolaram em 10/09/2026. Ate
+    aquela data estas fracoes eram tambem as da ponderacao do WACC, e o comentario dizia isso;
+    hoje `_wacc_receita` so olha as obras da PROPRIA sub-bacia, sem ratear. Continuam certas
+    para o que fazem: quem manda esgoto por uma obra compartilhada paga a fatia dela.
     Como as fracoes somam 1, a SOMA dos VPLs por sub-bacia reproduz EXATAMENTE o VPL do plano.
     Receita direta, indireta e efeito-base ja sao proprios de cada sub-bacia (nao ha rateio).
     Retorna {sub-bacia: {capex, opex, rec_dir, rec_ind, efeito_base, vpl}}."""
     plano=res.get("plano",{}) or {}; elig=res.get("elig",{}) or {}
     opini=res.get("opex_ini",{}) or {}; inif=res.get("inicio_fat",{}) or {}
     fatc=res.get("fator_esgoto_ano",{}) or {}
-    # quem EXIGE cada obra (topologico) — mesma logica de _vazao_por_obra
+    # quem EXIGE cada obra (topologico)
     by_rede={}; by_transp={}
     for q in cen.obras.values():
         if q.tipo=="rede": by_rede.setdefault(q.no,[]).append(q.id)
