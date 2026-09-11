@@ -241,10 +241,15 @@ def _wacc_receita(cen,o):
     `otim_dependencia`: la ele responde outra pergunta — quanto do CUSTO de uma obra
     compartilhada cabe a cada quem escoa por ela. Custo se rateia; desconto, nao.
 
-    Terceiros (capex 0) nao pesam. Sub-bacia sem CAPEX proprio -> WACC da propria ligacao."""
+    Terceiros (capex 0) nao pesam. Sub-bacia sem CAPEX proprio -> WACC da propria ligacao.
+
+    Uma passada pelas obras, e nao `requisitos()`: aquela caminha a cadeia inteira ate a
+    ETE para devolver obras que este filtro descarta em seguida, e isto roda por
+    sub-bacia por avaliacao. As obras DA sub-bacia sao as ancoradas nela: a propria
+    ligacao, a rede e o transporte com `no` igual — a ETE nao tem `no`."""
     num=den=0.0
-    for r in requisitos(cen,o):
-        if getattr(r,"no",None)!=o.no: continue           # transporte a jusante e ETE: nao sao dela
+    for r in cen.obras.values():
+        if r.no!=o.no or not r.necessaria: continue        # transporte a jusante e ETE: nao sao dela
         cx=getattr(r,"capex",0.0) or 0.0
         if cx<=0: continue
         num+=cx*cen.taxa_de(r); den+=cx
@@ -753,16 +758,14 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     for d in L("superintendencia-cidade"):
         cid_sup[d["cidade_id"]]=d["superintendencia_id"];cid_name[d["cidade_id"]]=d.get("cidade_name") or d["cidade_id"]
     # UM SISTEMA PODE ESTAR EM VARIAS CIDADES (migracao 022 do cadastro): `cidade-sistema`
-    # traz uma linha por cidade. `sis_cids` guarda todas; `sis_cid` guarda UMA — a menor,
-    # em ordem — e serve so de reserva para quem nao tem cidade propria. Reduzir a uma
-    # cidade "a ultima que veio" era o defeito: todo no de um sistema em duas cidades
-    # recebia a sobrevivente, e cobertura, metas e fator iam para a cidade errada.
+    # traz uma linha por cidade. `sis_cids` guarda todas. Reduzir a uma cidade "a ultima
+    # que veio" era o defeito: todo no de um sistema em duas cidades recebia a
+    # sobrevivente, e cobertura, metas e fator iam para a cidade errada.
     sis_cids={};sis_name={}
     for d in L("cidade-sistema"):
         _s=d["sistema_id"]; sis_cids.setdefault(_s,set())
         if d.get("cidade_id"): sis_cids[_s].add(d["cidade_id"])
         if _s not in sis_name: sis_name[_s]=d.get("sistema_name") or _s
-    sis_cid={_s:(min(_cs) if _cs else None) for _s,_cs in sis_cids.items()}
     # A CIDADE DE CADA COMPONENTE, dele mesmo: a sub-bacia tem `cidade_id` desde a
     # migracao 022, a CTS desde a 018. E por ela que o no e rotulado e que a cobertura
     # e agregada; a do sistema entra so quando a do componente nao veio (base anterior
@@ -812,8 +815,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         sup_uni={_k:_v for _k,_v in sup_uni.items() if _v==_au}
         cid_sup={_k:_v for _k,_v in cid_sup.items() if _k in _cid_ok}
         cid_name={_k:_v for _k,_v in cid_name.items() if _k in _cid_ok}
-        sis_cids={_k:(_v & _cid_ok) for _k,_v in sis_cids.items() if _k in _sis_ok}
-        sis_cid={_k:min(_v) for _k,_v in sis_cids.items()}          # a reserva fica DENTRO do escopo
+        sis_cids={_k:(_v & _cid_ok) for _k,_v in sis_cids.items() if _k in _sis_ok}   # so as cidades DENTRO do escopo
         sis_name={_k:_v for _k,_v in sis_name.items() if _k in _sis_ok}
         print(f"  [info] ESCOPO = UNIDADE {uni_name.get(_au,_au)} (regional {reg_name.get(_ar,_ar)}) — "
               f"{len(_cid_ok)} cidades, {len(_sis_ok)} sistemas. Todos os dados a seguir sao dessa unidade, "
@@ -843,13 +845,17 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         sup_uni={_k:_v for _k,_v in sup_uni.items() if _v in uni_reg}
         cid_sup={_k:_v for _k,_v in cid_sup.items() if _k in _cid_ok}
         cid_name={_k:_v for _k,_v in cid_name.items() if _k in _cid_ok}
-        sis_cids={_k:(_v & _cid_ok) for _k,_v in sis_cids.items() if _k in _sis_ok}
-        sis_cid={_k:min(_v) for _k,_v in sis_cids.items()}          # a reserva fica DENTRO do escopo
+        sis_cids={_k:(_v & _cid_ok) for _k,_v in sis_cids.items() if _k in _sis_ok}   # so as cidades DENTRO do escopo
         sis_name={_k:_v for _k,_v in sis_name.items() if _k in _sis_ok}
         if len(_regs)>1:
             print(f"  [info] REGIONAL selecionada: {reg_name.get(_alvo,_alvo)} "
                   f"({len(_cid_ok)} cidades, {len(_sis_ok)} sistemas) — as outras {len(_regs)-1} ficam de fora. "
                   f"Todos os dados a seguir sao dessa regional.")
+    # A CIDADE DE RESERVA de cada sistema: UMA — a menor, em ordem —, derivada depois do
+    # recorte (entao sempre dentro do escopo) e uma vez so. Serve para o no que nao tem
+    # cidade propria e para a regional/unidade do sistema. `None` quando o sistema nao
+    # declara cidade nenhuma — e ai `reg_de_sis` falha, como sempre falhou.
+    sis_cid={_s:min(_cs,default=None) for _s,_cs in sis_cids.items()}
     def reg_de_sis(sis): return uni_reg[sup_uni[cid_sup[sis_cid[sis]]]]
     def uni_de_sis(sis): return sup_uni[cid_sup[sis_cid[sis]]]          # UNIDADE = escopo de orcamento
     def cid_de(comp,sis):
@@ -1120,8 +1126,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         # o da concessao que acaba PRIMEIRO. E a leitura conservadora — um plano que
         # atravessasse o fim de uma das concessoes estaria investindo onde ja nao se
         # opera. Sistema em uma cidade so: o mesmo numero de antes.
-        _fins=[fim_cid[_c] for _c in sorted(sis_cids[sis]) if fim_cid.get(_c)]
-        _fim=(min(_fins) if _fins else None) or fim_sis.get(sis) or (ab+20)
+        _fim=min((fim_cid[_c] for _c in sis_cids[sis] if fim_cid.get(_c)),default=None) or fim_sis.get(sis) or (ab+20)
         hz[sis_name[sis]]=max(1,int(_fim)-ab+1)                                         # fim INCLUSIVE
         for _c in sis_cids[sis]: _anobase[cid_name[_c]]=ab                              # ano_base por CIDADE (metas sao por cidade)
     # ORCAMENTO = entrada do codigo (recomendado): escalar (aplica a todas as regionais),
