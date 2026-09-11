@@ -50,10 +50,10 @@ isso as FKs existem.
 | `unidade_regional` | `unidade_id` | `wacc_medio` é o WACC herdado por obra sem WACC próprio |
 | `regional_superintendencia` | `superintendencia_id` | FK → unidade |
 | `superintendencia_cidade` | `cidade_id` | FK → superintendência |
-| `cidade_sistema` | `sistema_id` | FK → cidade |
+| `cidade_sistema` | `(sistema_id, cidade_id)` | uma linha por cidade que o sistema atende — um sistema pode estar em várias (migração 022 do cadastro); FK → cidade |
 | `sistema_topologia` | `componente_sistema_id` | id de nó é **global** (o motor indexa por ele): não repita o mesmo id em dois sistemas. `componente_sistema_id_jusante` monta a cadeia até a ETE |
 | `cidade_operacional` | `cidade_id` | `data_fim_concessao` = horizonte (a régua da cobertura saiu daqui: é o parâmetro `UNIDADE_COBERTURA` da rodada) |
-| `subbacia_operacional` | `sub_bacia` | o cadastro econômico da sub-bacia |
+| `subbacia_operacional` | `sub_bacia` | o cadastro econômico da sub-bacia; `cidade_id` é a cidade DELA (migração 022) — é por ela que o nó é rotulado e a cobertura agregada, com a do sistema só de reserva |
 | `componentes_subbacias_capex` | `(sub_bacia, componente)` | uma linha = uma obra possível |
 | `ete_capex` | `ete_id` | módulos, capacidade, capex de terreno |
 | `regional_operacional` | `regional_id` | `ano_base` |
