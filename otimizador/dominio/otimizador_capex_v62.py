@@ -1323,7 +1323,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         cen.anos_capex=int(horizonte_capex) if horizonte_capex else cen.anos   # janela de INICIO de obras
     # --- DATA DE INICIO DAS OBRAS: nada pode comecar antes dela (1o ano-calendario fica parcial) ---
     _abref=min(_anobase.values()) if _anobase else 2026
-    _off=0
+    _off=0;_mi,_ai=1,_abref;_automatica=data_inicio is None
     if data_inicio is None:
         # SEM DATA INFORMADA, ELA E AUTOMATICA — pelo primeiro ano do CAPEX e pelo dia
         # da rodada (`data_inicio_automatica`). O primeiro ano do CAPEX e o do
@@ -1336,6 +1336,16 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         else:
             _p=str(data_inicio).replace("/","-").split("-"); _mi,_ai=int(_p[0]),int(_p[1])
         _off=max(0,(_ai-_abref)*12+(_mi-1))
+    # A DATA DE INICIO TEM DE CAIR DENTRO DA JANELA DE CAPEX. Fora dela, nenhuma obra
+    # tem mes permitido (`meses_permitidos` fica vazio) e a rodada sairia sem obra
+    # nenhuma — sem erro, so um plano vazio. Acontece com o cronograma curto que ficou
+    # para tras: `{2026: teto}` rodado em dezembro de 2026 ou em 2027 comeca em 2027,
+    # e a janela acabou em 2026. Melhor dizer isso do que devolver o vazio.
+    if _off>=int(cen.anos_capex)*12:
+        raise ValueError("a data de inicio das obras (%02d/%d%s) esta depois do fim da janela de CAPEX "
+                         "(%d a %d): nenhuma obra teria mes possivel. Estenda o cronograma de orcamento "
+                         "ou informe uma data de inicio dentro dele."
+                         % (_mi,_ai," — automatica" if _automatica else "",_abref,_abref+int(cen.anos_capex)-1))
     cen.mes_inicio=_off                                       # mes interno 0-based do inicio (0 = jan do ano_base)
     if _off>0:
         for _o in cen.obras.values(): _o.inicio_min=max(int(_o.inicio_min),_off)
