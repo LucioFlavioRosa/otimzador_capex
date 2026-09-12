@@ -50,10 +50,10 @@ isso as FKs existem.
 | `unidade_regional` | `unidade_id` | `wacc_medio` é o WACC herdado por obra sem WACC próprio |
 | `regional_superintendencia` | `superintendencia_id` | FK → unidade |
 | `superintendencia_cidade` | `cidade_id` | FK → superintendência |
-| `cidade_sistema` | `sistema_id` | FK → cidade |
+| `cidade_sistema` | `(sistema_id, cidade_id)` | uma linha por cidade que o sistema atende — um sistema pode estar em várias (migração 022 do cadastro); FK → cidade |
 | `sistema_topologia` | `componente_sistema_id` | id de nó é **global** (o motor indexa por ele): não repita o mesmo id em dois sistemas. `componente_sistema_id_jusante` monta a cadeia até a ETE |
 | `cidade_operacional` | `cidade_id` | `data_fim_concessao` = horizonte (a régua da cobertura saiu daqui: é o parâmetro `UNIDADE_COBERTURA` da rodada) |
-| `subbacia_operacional` | `sub_bacia` | o cadastro econômico da sub-bacia |
+| `subbacia_operacional` | `sub_bacia` | o cadastro econômico da sub-bacia; `cidade_id` é a cidade DELA (migração 022) — é por ela que o nó é rotulado e a cobertura agregada, com a do sistema só de reserva |
 | `componentes_subbacias_capex` | `(sub_bacia, componente)` | uma linha = uma obra possível |
 | `ete_capex` | `ete_id` | módulos, capacidade, capex de terreno |
 | `regional_operacional` | `regional_id` | `ano_base` |
@@ -213,7 +213,7 @@ Três regras, validadas em `job_databricks._params_para_ler_banco`:
 | `ORCAMENTO_TOTAL` | número | `None` | teto **total** da janela; o otimizador distribui entre os anos. **Não substitui `ORCAMENTO`** — a restrição anual continua vindo dele |
 | `HORIZONTE_CAPEX` | int | `None` | anos em que se pode investir |
 | `ANOS_EXTRA_CONCLUSAO` | int | `3` | cauda para concluir o que começou |
-| `DATA_INICIO` | data | `None` | início do cronograma |
+| `DATA_INICIO` | `(mês, ano)` ou `"MM-AAAA"` | `None` = **automática** | mês a partir do qual as obras podem começar. Ausente, o motor deriva do primeiro ano do CAPEX e do dia da rodada (`data_inicio_automatica`): CAPEX começando no ano da rodada → mês seguinte ao da rodada (rodada em 14/09/2026 → 10/2026); CAPEX começando num ano futuro → janeiro dele (2027 → 01/2027); cronograma começando num ano já passado → mês seguinte ao da rodada. O primeiro ano do CAPEX é o do cronograma, ou o ano-base do cadastro com teto anual único |
 | `BASE_RECEITA` | `"arrecadada"` \| `"faturada"` | `"arrecadada"` | base de receita da rodada |
 | `CURVA_ADOCAO` | `"scurve"` \| … | `"scurve"` | ritmo de adesão das ligações novas |
 | `USAR_CTS` | bool | `true` | CTS como nó próprio |

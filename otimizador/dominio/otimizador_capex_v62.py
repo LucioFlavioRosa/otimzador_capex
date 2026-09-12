@@ -19,8 +19,37 @@ FATURAMENTO de uma sub-bacia (revenue) so comeca quando TODAS as obras necessari
 Objetivo: max VPL. Cobertura por cidade conta so ligacoes tratadas. Orcamento/paralelo: so Aegea.
 Le planilha Excel (abas: Componentes, Parametros, Cidades, Nos, Obras_Coleta, Obras_Transporte, Obras_ETE, Orcamento).
 """
+from datetime import date
 from itertools import product
 import math
+
+
+def hoje():
+    """A data da rodada. Uma funcao, e nao `date.today()` inline, para os testes
+    fixarem o dia (ver `tests/conftest.py`) — a data de inicio automatica das obras
+    depende dele, e um golden que muda com o calendario nao e golden."""
+    return date.today()
+
+
+def data_inicio_automatica(primeiro_ano_capex, dia=None):
+    """QUANDO AS OBRAS PODEM COMECAR, quando ninguem informou `data_inicio`: (mes, ano).
+
+    A regra (09/2026): o cronograma de CAPEX comeca num ano, e a rodada acontece num
+    dia. Se o primeiro ano do CAPEX e o ano da rodada, as obras comecam no MES SEGUINTE
+    ao da rodada — rodada em 14/09/2026 com CAPEX a partir de 2026 comeca as obras em
+    10/2026: os meses ja passados nao recebem obra. Se o primeiro ano do CAPEX esta no
+    futuro, comecam em JANEIRO dele — CAPEX a partir de 2027 comeca em 01/2027.
+
+    Cronograma que comeca num ano JA PASSADO (o cronograma padrao da tela comeca em
+    2026 e vai continuar comecando ate alguem o mudar) cai no primeiro caso: mes
+    seguinte ao da rodada. E o unico sentido possivel — janeiro daquele ano poria obra
+    em meses que ja acabaram, e o motor os apagaria em silencio no `max(0, ...)`.
+
+    Dezembro vira janeiro do ano seguinte, que e o "mes seguinte" de dezembro.
+    """
+    d=dia or hoje()
+    if int(primeiro_ano_capex)>d.year: return (1,int(primeiro_ano_capex))
+    return (1,d.year+1) if d.month==12 else (d.month+1,d.year)
 
 class No:
     def __init__(self,id,cidade,sistema,regional,jusante):
@@ -241,10 +270,15 @@ def _wacc_receita(cen,o):
     `otim_dependencia`: la ele responde outra pergunta — quanto do CUSTO de uma obra
     compartilhada cabe a cada quem escoa por ela. Custo se rateia; desconto, nao.
 
-    Terceiros (capex 0) nao pesam. Sub-bacia sem CAPEX proprio -> WACC da propria ligacao."""
+    Terceiros (capex 0) nao pesam. Sub-bacia sem CAPEX proprio -> WACC da propria ligacao.
+
+    Uma passada pelas obras, e nao `requisitos()`: aquela caminha a cadeia inteira ate a
+    ETE para devolver obras que este filtro descarta em seguida, e isto roda por
+    sub-bacia por avaliacao. As obras DA sub-bacia sao as ancoradas nela: a propria
+    ligacao, a rede e o transporte com `no` igual — a ETE nao tem `no`."""
     num=den=0.0
-    for r in requisitos(cen,o):
-        if getattr(r,"no",None)!=o.no: continue           # transporte a jusante e ETE: nao sao dela
+    for r in cen.obras.values():
+        if r.no!=o.no or not r.necessaria: continue        # transporte a jusante e ETE: nao sao dela
         cx=getattr(r,"capex",0.0) or 0.0
         if cx<=0: continue
         num+=cx*cen.taxa_de(r); den+=cx
@@ -752,9 +786,24 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     cid_sup={};cid_name={}
     for d in L("superintendencia-cidade"):
         cid_sup[d["cidade_id"]]=d["superintendencia_id"];cid_name[d["cidade_id"]]=d.get("cidade_name") or d["cidade_id"]
-    sis_cid={};sis_name={}
+    # UM SISTEMA PODE ESTAR EM VARIAS CIDADES (migracao 022 do cadastro): `cidade-sistema`
+    # traz uma linha por cidade. `sis_cids` guarda todas. Reduzir a uma cidade "a ultima
+    # que veio" era o defeito: todo no de um sistema em duas cidades recebia a
+    # sobrevivente, e cobertura, metas e fator iam para a cidade errada.
+    sis_cids={};sis_name={}
     for d in L("cidade-sistema"):
-        sis_cid[d["sistema_id"]]=d["cidade_id"];sis_name[d["sistema_id"]]=d.get("sistema_name") or d["sistema_id"]
+        _s=d["sistema_id"]; sis_cids.setdefault(_s,set())
+        if d.get("cidade_id"): sis_cids[_s].add(d["cidade_id"])
+        if _s not in sis_name: sis_name[_s]=d.get("sistema_name") or _s
+    # A CIDADE DE CADA COMPONENTE, dele mesmo: a sub-bacia tem `cidade_id` desde a
+    # migracao 022, a CTS desde a 018. E por ela que o no e rotulado e que a cobertura
+    # e agregada; a do sistema entra so quando a do componente nao veio (base anterior
+    # a 022, ou carga sem a coluna).
+    cid_de_comp={}
+    for d in L("subbacia-operacional"):
+        if d.get("sub_bacia") and d.get("cidade_id"): cid_de_comp[d["sub_bacia"]]=d["cidade_id"]
+    for d in L("cts-operacional"):
+        if d.get("cts") and d.get("cidade_id"): cid_de_comp[d["cts"]]=d["cidade_id"]
     # ---- REGIONAL: o otimizador roda para UMA regional por vez. -----------------
     # 'regional' aceita o id (r1) ou o nome ("Regional Metropolitana"). Com o banco de uma
     # regional so, o parametro e opcional e o comportamento nao muda.
@@ -787,7 +836,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
             raise ValueError("unidade '%s' nao existe no banco. Disponiveis: %s"
                              % (unidade, [(u, uni_name.get(u,u)) for u in _unis]))
         _cid_ok={_c for _c,_sp in cid_sup.items() if sup_uni.get(_sp)==_au}
-        _sis_ok={_s for _s,_c in sis_cid.items() if _c in _cid_ok}
+        _sis_ok={_s for _s,_cs in sis_cids.items() if _cs & _cid_ok}
         _ar=uni_reg[_au]
         reg_name={_k:_v for _k,_v in reg_name.items() if _k==_ar}
         uni_reg={_au:_ar}
@@ -795,7 +844,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         sup_uni={_k:_v for _k,_v in sup_uni.items() if _v==_au}
         cid_sup={_k:_v for _k,_v in cid_sup.items() if _k in _cid_ok}
         cid_name={_k:_v for _k,_v in cid_name.items() if _k in _cid_ok}
-        sis_cid={_k:_v for _k,_v in sis_cid.items() if _k in _sis_ok}
+        sis_cids={_k:(_v & _cid_ok) for _k,_v in sis_cids.items() if _k in _sis_ok}   # so as cidades DENTRO do escopo
         sis_name={_k:_v for _k,_v in sis_name.items() if _k in _sis_ok}
         print(f"  [info] ESCOPO = UNIDADE {uni_name.get(_au,_au)} (regional {reg_name.get(_ar,_ar)}) — "
               f"{len(_cid_ok)} cidades, {len(_sis_ok)} sistemas. Todos os dados a seguir sao dessa unidade, "
@@ -818,21 +867,31 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         _alvo=_regs[0] if _regs else None
       if _alvo is not None:
         _cid_ok={_c for _c,_sp in cid_sup.items() if uni_reg.get(sup_uni.get(_sp))==_alvo}
-        _sis_ok={_s for _s,_c in sis_cid.items() if _c in _cid_ok}
+        _sis_ok={_s for _s,_cs in sis_cids.items() if _cs & _cid_ok}
         reg_name={_k:_v for _k,_v in reg_name.items() if _k==_alvo}
         uni_reg={_k:_v for _k,_v in uni_reg.items() if _v==_alvo}
         uni_name={_k:_v for _k,_v in uni_name.items() if _k in uni_reg}
         sup_uni={_k:_v for _k,_v in sup_uni.items() if _v in uni_reg}
         cid_sup={_k:_v for _k,_v in cid_sup.items() if _k in _cid_ok}
         cid_name={_k:_v for _k,_v in cid_name.items() if _k in _cid_ok}
-        sis_cid={_k:_v for _k,_v in sis_cid.items() if _k in _sis_ok}
+        sis_cids={_k:(_v & _cid_ok) for _k,_v in sis_cids.items() if _k in _sis_ok}   # so as cidades DENTRO do escopo
         sis_name={_k:_v for _k,_v in sis_name.items() if _k in _sis_ok}
         if len(_regs)>1:
             print(f"  [info] REGIONAL selecionada: {reg_name.get(_alvo,_alvo)} "
                   f"({len(_cid_ok)} cidades, {len(_sis_ok)} sistemas) — as outras {len(_regs)-1} ficam de fora. "
                   f"Todos os dados a seguir sao dessa regional.")
+    # A CIDADE DE RESERVA de cada sistema: UMA — a menor, em ordem —, derivada depois do
+    # recorte (entao sempre dentro do escopo) e uma vez so. Serve para o no que nao tem
+    # cidade propria e para a regional/unidade do sistema. `None` quando o sistema nao
+    # declara cidade nenhuma — e ai `reg_de_sis` falha, como sempre falhou.
+    sis_cid={_s:min(_cs,default=None) for _s,_cs in sis_cids.items()}
     def reg_de_sis(sis): return uni_reg[sup_uni[cid_sup[sis_cid[sis]]]]
     def uni_de_sis(sis): return sup_uni[cid_sup[sis_cid[sis]]]          # UNIDADE = escopo de orcamento
+    def cid_de(comp,sis):
+        """A cidade do componente — a dele, ou a do sistema quando a dele nao veio ou
+        esta fora do escopo. Sempre um id que `cid_name` conhece."""
+        _c=cid_de_comp.get(comp)
+        return _c if _c in cid_name else sis_cid[sis]
     _wm_used={'n':0}
     def _wacc_fb(raw, sis):
         # WACC do componente = financiamento contratado; se VAZIO, consome o wacc_medio da UNIDADE
@@ -1087,14 +1146,18 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     for d in sb_rows:
         sb=d["componente_sistema_id"];sis=d["sistema_id"];sis_de_sb[sb]=sis
         # O 4o campo do No e o EIXO DE ORCAMENTO — que agora e a UNIDADE, nao a regional.
-        nos.append(No(sb,cid_name[sis_cid[sis]],sis_name[sis],uni_name[uni_de_sis(sis)],d.get("componente_sistema_id_jusante")))
+        nos.append(No(sb,cid_name[cid_de(sb,sis)],sis_name[sis],uni_name[uni_de_sis(sis)],d.get("componente_sistema_id_jusante")))
     cidades=[Cidade(nm,0.0,0.0,0.0,99) for c,nm in cid_name.items()]   # cobertura e por SISTEMA (aba metas-cobertura); cidade so p/ rotulo
     hz={}; _anobase={}
     for sis in sis_cid:
         reg=reg_de_sis(sis);ab=int(num((regop.get(reg) or {}).get("ano_base"),2026))
-        _fim=fim_cid.get(sis_cid[sis]) or fim_sis.get(sis) or (ab+20)                   # concessao pela CIDADE (fallback sistema/padrao)
-        hz[sis_name[sis]]=max(1,int(_fim)-ab+1)                                         # fim INCLUSIVE; horizonte do sistema = fim da sua cidade
-        _anobase[cid_name[sis_cid[sis]]]=ab                                             # ano_base por CIDADE (metas sao por cidade)
+        # A CONCESSAO E POR CIDADE, e o sistema pode estar em varias: o horizonte dele e
+        # o da concessao que acaba PRIMEIRO. E a leitura conservadora — um plano que
+        # atravessasse o fim de uma das concessoes estaria investindo onde ja nao se
+        # opera. Sistema em uma cidade so: o mesmo numero de antes.
+        _fim=min((fim_cid[_c] for _c in sis_cids[sis] if fim_cid.get(_c)),default=None) or fim_sis.get(sis) or (ab+20)
+        hz[sis_name[sis]]=max(1,int(_fim)-ab+1)                                         # fim INCLUSIVE
+        for _c in sis_cids[sis]: _anobase[cid_name[_c]]=ab                              # ano_base por CIDADE (metas sao por cidade)
     # ORCAMENTO = entrada do codigo (recomendado): escalar (aplica a todas as regionais),
     # dict {regional_name: valor_ano | [por ano]}, ou None. Se None, tenta a aba 'orcamento'; senao infinito.
     INF=float("inf")
@@ -1261,6 +1324,13 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     # --- DATA DE INICIO DAS OBRAS: nada pode comecar antes dela (1o ano-calendario fica parcial) ---
     _abref=min(_anobase.values()) if _anobase else 2026
     _off=0
+    if data_inicio is None:
+        # SEM DATA INFORMADA, ELA E AUTOMATICA — pelo primeiro ano do CAPEX e pelo dia
+        # da rodada (`data_inicio_automatica`). O primeiro ano do CAPEX e o do
+        # cronograma quando ha um; com teto anual unico a janela comeca no ano-base.
+        data_inicio=data_inicio_automatica(min(orcamento) if _orc_cal else _abref)
+        print(f"  [inicio] data de inicio automatica: {data_inicio[0]:02d}/{data_inicio[1]} "
+              f"(primeiro ano do CAPEX {min(orcamento) if _orc_cal else _abref}, rodada em {hoje():%d/%m/%Y})")
     if data_inicio is not None:
         if isinstance(data_inicio,(list,tuple)): _mi,_ai=int(data_inicio[0]),int(data_inicio[1])
         else:
@@ -1300,7 +1370,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     _unid={_nm:_u for _nm in cid_name.values()}
     _ufat={}; _sem_pop=[]
     for _sb2,_sis2 in sis_de_sb.items():
-        _cn2=cid_name[sis_cid[_sis2]]; _u2=_unid.get(_cn2,"ligacoes"); _so2=subop.get(_sb2,{})
+        _cn2=cid_name[cid_de(_sb2,_sis2)]; _u2=_unid.get(_cn2,"ligacoes"); _so2=subop.get(_sb2,{})
         _dd=_dens_sb.get(_sb2,{})
         # Com o recorte ligado a conversao usa a densidade RESIDENCIAL: o numerador e o
         # denominador ja estao em ligacoes residenciais.
@@ -1331,7 +1401,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     maxlig={}; baselig={}; _aviso_univ=[]; _pot_sb={}; _n_pot=0
     for _sb,_lst in comp.items():
         if _sb not in sis_de_sb: continue
-        _sn=cid_name[sis_cid[sis_de_sb[_sb]]]                              # agrega por CIDADE
+        _sn=cid_name[cid_de(_sb,sis_de_sb[_sb])]                           # agrega pela cidade DO COMPONENTE
         _so=subop.get(_sb,{})
         # O TRIPLO DA COBERTURA. Com o recorte ligado sao as colunas residenciais; a
         # sub-bacia que nao tiver a residencial cai para a total, que e a degradacao
