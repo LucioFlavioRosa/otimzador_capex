@@ -67,3 +67,29 @@ def test_teto_anual_unico_conta_do_ano_base(monkeypatch):
     e ele o "primeiro ano do CAPEX" da regra."""
     cen = _ler(50e6, monkeypatch, horizonte_capex=4)
     assert cen.mes_inicio == 9
+
+
+def test_inicio_depois_da_janela_de_capex_e_erro_e_nao_plano_vazio(monkeypatch):
+    """Cronograma so de 2026 rodado em dezembro de 2026: a data automatica e 01/2027, e a
+    janela acabou em 2026 — nenhuma obra teria mes possivel. O motor diz isso em vez de
+    devolver um plano vazio sem explicacao."""
+    import pytest
+
+    monkeypatch.setattr(M, "hoje", lambda: date(2026, 12, 20))
+    with pytest.raises(ValueError, match="janela de CAPEX"):
+        silent(M.ler_banco, banco(BANK_FIXTURE), orcamento={2026: 50e6}, unidade="u1", usar_cts=False)
+    # Informada, a mesma data fora da janela e o mesmo erro.
+    with pytest.raises(ValueError, match="janela de CAPEX"):
+        silent(M.ler_banco, banco(BANK_FIXTURE), orcamento={2026: 50e6}, unidade="u1", usar_cts=False,
+               data_inicio=(1, 2027))
+
+
+def test_no_job_databricks_data_inicio_vazia_e_o_mesmo_que_ausente():
+    """A tela manda `""` quando ninguem digitou; repassada ao motor ela morreria no
+    parser de texto. Vazia ou ausente, e a data automatica que vale."""
+    from otimizador.aplicacao import job_databricks as J
+
+    assert "data_inicio" not in J._params_para_ler_banco({"ORCAMENTO": 1.0, "DATA_INICIO": ""})
+    assert "data_inicio" not in J._params_para_ler_banco({"ORCAMENTO": 1.0, "DATA_INICIO": "  "})
+    assert "data_inicio" not in J._params_para_ler_banco({"ORCAMENTO": 1.0, "DATA_INICIO": None})
+    assert J._params_para_ler_banco({"ORCAMENTO": 1.0, "DATA_INICIO": "03-2027"})["data_inicio"] == "03-2027"

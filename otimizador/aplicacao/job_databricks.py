@@ -135,6 +135,11 @@ def _params_para_ler_banco(p):
     kwargs = {kw: p[chave] for chave, kw in MAPA_PARAMS.items() if chave in p}
     if "orcamento" in kwargs:
         kwargs["orcamento"] = _normalizar_orcamento(kwargs["orcamento"])
+    # DATA_INICIO VAZIA E DATA_INICIO AUSENTE: as duas pedem a data automatica do motor
+    # (primeiro ano do CAPEX x dia da rodada). `""` repassada cairia no parser de texto
+    # de `ler_banco` e morreria num `int("")` — a tela manda vazio quando ninguem digitou.
+    if "data_inicio" in kwargs and (kwargs["data_inicio"] is None or not str(kwargs["data_inicio"]).strip()):
+        del kwargs["data_inicio"]
     return kwargs
 
 
