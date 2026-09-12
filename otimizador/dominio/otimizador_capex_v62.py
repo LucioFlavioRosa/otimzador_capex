@@ -19,8 +19,37 @@ FATURAMENTO de uma sub-bacia (revenue) so comeca quando TODAS as obras necessari
 Objetivo: max VPL. Cobertura por cidade conta so ligacoes tratadas. Orcamento/paralelo: so Aegea.
 Le planilha Excel (abas: Componentes, Parametros, Cidades, Nos, Obras_Coleta, Obras_Transporte, Obras_ETE, Orcamento).
 """
+from datetime import date
 from itertools import product
 import math
+
+
+def hoje():
+    """A data da rodada. Uma funcao, e nao `date.today()` inline, para os testes
+    fixarem o dia (ver `tests/conftest.py`) — a data de inicio automatica das obras
+    depende dele, e um golden que muda com o calendario nao e golden."""
+    return date.today()
+
+
+def data_inicio_automatica(primeiro_ano_capex, dia=None):
+    """QUANDO AS OBRAS PODEM COMECAR, quando ninguem informou `data_inicio`: (mes, ano).
+
+    A regra (09/2026): o cronograma de CAPEX comeca num ano, e a rodada acontece num
+    dia. Se o primeiro ano do CAPEX e o ano da rodada, as obras comecam no MES SEGUINTE
+    ao da rodada — rodada em 14/09/2026 com CAPEX a partir de 2026 comeca as obras em
+    10/2026: os meses ja passados nao recebem obra. Se o primeiro ano do CAPEX esta no
+    futuro, comecam em JANEIRO dele — CAPEX a partir de 2027 comeca em 01/2027.
+
+    Cronograma que comeca num ano JA PASSADO (o cronograma padrao da tela comeca em
+    2026 e vai continuar comecando ate alguem o mudar) cai no primeiro caso: mes
+    seguinte ao da rodada. E o unico sentido possivel — janeiro daquele ano poria obra
+    em meses que ja acabaram, e o motor os apagaria em silencio no `max(0, ...)`.
+
+    Dezembro vira janeiro do ano seguinte, que e o "mes seguinte" de dezembro.
+    """
+    d=dia or hoje()
+    if int(primeiro_ano_capex)>d.year: return (1,int(primeiro_ano_capex))
+    return (1,d.year+1) if d.month==12 else (d.month+1,d.year)
 
 class No:
     def __init__(self,id,cidade,sistema,regional,jusante):
@@ -1295,6 +1324,13 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     # --- DATA DE INICIO DAS OBRAS: nada pode comecar antes dela (1o ano-calendario fica parcial) ---
     _abref=min(_anobase.values()) if _anobase else 2026
     _off=0
+    if data_inicio is None:
+        # SEM DATA INFORMADA, ELA E AUTOMATICA — pelo primeiro ano do CAPEX e pelo dia
+        # da rodada (`data_inicio_automatica`). O primeiro ano do CAPEX e o do
+        # cronograma quando ha um; com teto anual unico a janela comeca no ano-base.
+        data_inicio=data_inicio_automatica(min(orcamento) if _orc_cal else _abref)
+        print(f"  [inicio] data de inicio automatica: {data_inicio[0]:02d}/{data_inicio[1]} "
+              f"(primeiro ano do CAPEX {min(orcamento) if _orc_cal else _abref}, rodada em {hoje():%d/%m/%Y})")
     if data_inicio is not None:
         if isinstance(data_inicio,(list,tuple)): _mi,_ai=int(data_inicio[0]),int(data_inicio[1])
         else:
