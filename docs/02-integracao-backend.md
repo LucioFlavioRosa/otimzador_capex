@@ -89,45 +89,50 @@ quem paga a conta é a ligação, seja de casa ou de fábrica, e a indústria ma
 ETE precisa tratar. Não há coluna `*_industrial` no cadastro: a parcela residencial é medida,
 não deduzida por subtração.
 
-**(b2) A sub-bacia diz o que atende SEM a CTS.**
+**(b2) A sub-bacia diz o que atende COM e SEM a CTS.**
 
-As colunas de ligação e economia da sub-bacia são o que pertence **exclusivamente** a ela. A
-CTS cobre uma área que se **sobrepõe** a essa, e a sobreposição é contada **uma vez só**, na
-entidade que a atende em cada cenário:
+A sub-bacia traz duas versões de cada medida (semântica da planilha do Databricks, conferida
+em 09/2026 contra a planilha de CTS):
 
-| rodada | quem atende a sobreposição | o que o motor lê na sub-bacia |
+- **sem sufixo** — a sub-bacia inteira, sem considerar a CTS: a área que o coletor atende está
+  dentro. É o número maior (ou igual, onde não há CTS).
+- **`*_com_cts`** — a sub-bacia com a CTS considerada à parte: só o que não é área do coletor.
+  **Vazia** quando a CTS levou a sub-bacia inteira (Nilópolis tem seis assim).
+
+A sobreposição é contada **uma vez só**, na entidade que a atende em cada cenário:
+
+| rodada | quem atende a área do coletor | o que o motor lê na sub-bacia |
 |---|---|---|
-| `usar_cts=true` | a CTS (que entra como nó próprio, com as obras dela) | as colunas exclusivas |
-| `usar_cts=false` | a sub-bacia (as obras da CTS ficam de fora) | as colunas `*_com_cts` |
+| `usar_cts=true` | a CTS (nó próprio, com as obras e a linha dela) | as colunas `*_com_cts` |
+| `usar_cts=false` | a sub-bacia (as obras da CTS ficam de fora) | as colunas sem sufixo |
 
-São oito, e elas cruzam com o recorte residencial porque as duas escolhas são
-independentes: `universo_ligacoes_com_cts`, `ligacoes_atuais_com_cts`,
-`universo_economias_com_cts`, `economias_atuais_com_cts`, e as quatro
-`*_residencial_com_cts` equivalentes.
+São dez: `universo_ligacoes_com_cts`, `ligacoes_atuais_com_cts`, `universo_economias_com_cts`,
+`economias_atuais_com_cts`, as quatro `*_residencial_com_cts` equivalentes, e
+`receita_faturada_media_mensal_com_cts` / `receita_arrecadada_media_mensal_com_cts` — a receita
+entra na troca pela mesma razão: com o coletor, a da área dele está na linha da CTS.
 
-**NÃO é a soma das duas linhas.** A ligação da área sobreposta está nas duas, e somá-las a
-contaria duas vezes: onde houver sobreposição real, o valor apurado é **menor** que a soma.
+Regras de borda, com o coletor: `*_com_cts` vazia numa sub-bacia pareada (`subbacia_cts`) ou
+na cidade de alguma CTS vale **zero** (a CTS levou tudo — `[aviso]`); vazia sem CTS por perto
+é só coluna não preenchida e vale a sem sufixo. Base **sem** as colunas (anterior a elas): a
+sub-bacia entra inteira e o motor `[ALERTA]` que a área do coletor conta duas vezes. As
+ligações novas (`*_novas_obras`) são derivadas como universo − atuais das colunas lidas, então
+encolhem junto. Vazão e população não trocam.
 
-**Ligado e desligado não têm a mesma demanda**, e isso é correto: sem o coletor, a parte da
-área que só ele alcançava não é atendida por ninguém.
+**NÃO é a soma das duas linhas.** Somar a linha da CTS à sub-bacia inteira contaria a área do
+coletor duas vezes.
 
-**Vazão, receita e população NÃO são somadas.** Elas são **dado da sub-bacia**, e o motor não inventa o valor delas para o cenário sem coletor: se
-desligar a CTS muda a vazão da sub-bacia, **quem atualiza a base é quem cadastra**. A escolha
-de considerar ou não a CTS não mexe em receita.
+**Vazão e população NÃO são somadas nem trocadas.** Elas são **dado da sub-bacia**, sem
+versão `_com_cts`, e o motor não inventa o valor delas para nenhum cenário: se desligar a CTS
+muda a vazão da sub-bacia, **quem atualiza a base é quem cadastra**.
 
 Duas consequências que valem estar escritas:
 
 - **A ETE é dimensionada com a vazão que estiver na base.** Se ela não refletir o cenário sem
-  coletor, falta o esgoto que vinha por ele. O motor avisa em toda rodada que absorve uma CTS.
-- **A receita da linha da CTS não é herdada.** Sem o coletor, as ligações que ele atenderia
-  são ligadas pelas obras da sub-bacia e cobradas pelo **ticket dela**. O ticket em si não
-  muda com a escolha: ele sai da base comercial da própria sub-bacia (`receita ÷ ligações
-  atuais exclusivas`), e o número consolidado não entra nessa divisão.
-
-Enquanto a exportação não trouxer os valores apurados, as oito são derivadas
-(`exclusiva + CTS pareada`, que reproduz exatamente a soma antiga) por
-a carga do cadastro, e a origem fica marcada em `sobreposicao_origem`
-(`derivado_soma` | `sem_cts`). Coluna ausente faz o motor voltar a somar, avisando.
+  coletor, falta o esgoto que vinha por ele.
+- **A receita da linha da CTS nunca é somada à sub-bacia.** O que muda com a escolha é qual
+  receita da própria sub-bacia entra: com o coletor, a `_com_cts`; sem ele, a sem sufixo. O
+  ticket sai de `receita ÷ ligações atuais` **das mesmas colunas** — as duas trocam juntas, e a
+  divisão nunca mistura uma versão com a outra.
 
 **População não tem versão residencial**: indústria não mora, então `universo_populacao` já é
 residencial. Cidade que mede a meta em população ignora as quatro colunas acima.

@@ -30,8 +30,8 @@ def test_cada_cts_tem_os_quatro_componentes_certos(cen_on):
 # ESTE BLOCO AFIRMAVA IGUALDADE, e a igualdade caiu junto com a soma. Ligado e desligado
 # eram "a mesma demanda" porque a linha da CTS era somada na sub-bacia — e somar conserva
 # tudo. Hoje a unica diferenca para a sub-bacia e QUAL COLUNA E LIDA: com o coletor, a
-# exclusiva; sem ele, a `*_com_cts`. Sao dois cenarios diferentes, e nao duas contas do
-# mesmo cenario.
+# `*_com_cts` (o que sobra para ela); sem ele, a sem sufixo (a sub-bacia inteira). Sao
+# dois cenarios diferentes, e nao duas contas do mesmo cenario.
 def test_desligado_atende_menos_que_ligado(res_on, res_off):
     # Sem o coletor, a area que so ele alcancava fica sem atendimento. Nesta fixture, que
     # nao tem as colunas consolidadas, some a demanda inteira da CTS.
@@ -113,26 +113,27 @@ def test_banco_sem_cts_modos_sao_identicos():
     assert set(a.obras) == set(b.obras)
 
 
-# ---------------------------------------------------------------- sobreposicao consolidada
+# ---------------------------------------------------------------- as duas colunas
 #
-# AS INVARIANTES DE CIMA VALEM NO CAMINHO DE COMPATIBILIDADE, e este bloco existe para
-# dizer por que. Enquanto a origem nao traz as colunas `*_com_cts`, o motor SOMA a linha
-# da CTS na sub-bacia — e somar conserva tudo, entao ligado e desligado tem a mesma
-# demanda total. E tambem CONTA DUAS VEZES a area sobreposta, que e o defeito.
+# A SEMANTICA E A DA PLANILHA DO DATABRICKS (conferida em 09/2026): a coluna sem sufixo e
+# a sub-bacia INTEIRA, sem considerar a CTS; a `*_com_cts` e a sub-bacia com a CTS
+# considerada a parte — so o que nao e area do coletor, e VAZIA quando o coletor levou
+# tudo. A sobreposicao e contada uma vez: na CTS quando ela existe (`usar_cts=True`, e a
+# sub-bacia le `_com_cts`), na sub-bacia quando nao existe (sem sufixo).
 #
-# Com as colunas consolidadas, a igualdade deixa de valer POR CONSTRUCAO: sem o coletor,
-# a parte da area que so ele alcancava nao e atendida por ninguem. O que se conserva e
-# outra coisa — cada cenario conta a sobreposicao uma vez.
+# Esta fixture NAO tem as colunas `_com_cts` — e o caminho de compatibilidade, em que a
+# sub-bacia entra inteira nos dois modos e o motor ALERTA que, com o coletor, a area
+# dele conta duas vezes. Os testes abaixo acrescentam as colunas a mao.
 
 from _helpers import BANK_CTS, banco, silent
 
 
-def _com_consolidado(por_sub):
+def _com_colunas(por_sub):
     """As abas do banco de CTS com as colunas `*_com_cts` de `{sub: {coluna: valor}}`.
 
     So a sub-bacia nomeada recebe a coluna. As outras ficam SEM ela, e e de proposito: e
-    assim que o banco real chega enquanto a carga nao preenche todas — o motor tem de
-    saber cair na coluna exclusiva quando a consolidada falta."""
+    assim que o banco chega enquanto a carga nao preenche todas — o motor tem de saber
+    cair na coluna sem sufixo quando a `_com_cts` nem existe na linha."""
     abas = banco(BANK_CTS)
     for linha in abas["subbacia-operacional"]:
         valores = por_sub.get(linha.get("sub_bacia"))
@@ -141,67 +142,108 @@ def _com_consolidado(por_sub):
     return abas
 
 
-#: b1 atende 1.200 sem o coletor (1.000 exclusivas + 200 de sobreposicao); b4 atende 1.350.
-CONSOLIDADO = {
-    "b1": {"universo_ligacoes_com_cts": 1200, "ligacoes_atuais_com_cts": 450,
-           "universo_economias_com_cts": 1320, "economias_atuais_com_cts": 495},
-    "b4": {"universo_ligacoes_com_cts": 1350, "ligacoes_atuais_com_cts": 560,
-           "universo_economias_com_cts": 1485, "economias_atuais_com_cts": 616},
+#: b1 tem 1.000 ligacoes inteira; com a cts1 a parte sobram 800 (200 sao area do coletor).
+#: b4 tem 1.200; com a cts2 a parte sobram 1.050. A receita encolhe junto.
+COM_CTS = {
+    "b1": {"universo_ligacoes_com_cts": 800, "ligacoes_atuais_com_cts": 350,
+           "universo_economias_com_cts": 880, "economias_atuais_com_cts": 385,
+           "receita_faturada_media_mensal_com_cts": 160000,
+           "receita_arrecadada_media_mensal_com_cts": 144000},
+    "b4": {"universo_ligacoes_com_cts": 1050, "ligacoes_atuais_com_cts": 450,
+           "universo_economias_com_cts": 1155, "economias_atuais_com_cts": 495,
+           "receita_faturada_media_mensal_com_cts": 140000,
+           "receita_arrecadada_media_mensal_com_cts": 126000},
 }
 
 
-def test_sem_cts_le_a_coluna_consolidada_em_vez_de_somar():
-    # b1 tem 1000 ligacoes exclusivas e a cts1 tem 500. A soma daria 1500 — e conta a
-    # area sobreposta duas vezes. A coluna diz que a sub-bacia, sem o coletor, atende
-    # 1200: as 1000 dela mais 200 de sobreposicao.
-    arq = _com_consolidado(CONSOLIDADO)
+def test_com_cts_a_sub_bacia_le_a_coluna_com_cts():
+    # b1 tem 1000 ligacoes inteira e a cts1 atende 500, das quais 200 dentro de b1. Com o
+    # coletor, b1 fica com as 800 que sobram; as 200 estao na CTS. Somar 1000 + 500
+    # contaria as 200 duas vezes.
+    arq = _com_colunas(COM_CTS)
     M = engine()
-    off = silent(M.ler_banco, arq, usar_cts=False)
-    cid = off.nos["b1"].cidade
-    # b1 e b2 estao na mesma cidade. O universo EFETIVO ja leva o potencial:
-    #   b1 = 1200 (consolidado) x 1,0 (o potencial da PROPRIA sub-bacia) = 1200
-    #   + b2 = 900 (potencial 1,0)
-    # Somando as duas linhas daria 1600 em b1 — a area sobreposta contada duas vezes.
-    assert off.max_lig[cid] == pytest.approx(2100.0)
+    on = silent(M.ler_banco, arq, usar_cts=True)
+    cid = on.nos["b1"].cidade
+    # b1, b2 e cts1 estao na mesma cidade. O universo EFETIVO ja leva o potencial:
+    #   b1 = 800 (com_cts) x 1,0 + b2 = 900 x 1,0 + cts1 = 500 x 1,2 = 2300
+    assert on.max_lig[cid] == pytest.approx(2300.0)
+    # A receita tambem e a `_com_cts` (base arrecadada, o padrao): 144.000 / 350.
+    assert on.sub_receita["b1"]["ticket"] == pytest.approx(144000 / 350)
 
 
-def test_a_area_so_do_coletor_nao_e_atendida_sem_ele():
-    # Com as duas sub-bacias pareadas informando o consolidado, o cenario fica limpo:
+def test_a_area_do_coletor_e_contada_uma_vez_em_cada_cenario():
+    # Com as duas sub-bacias pareadas trazendo a coluna:
     #
-    #   ON   b1 1000 + b2 900 + cts1 500x1,2 = 2500  |  b3 800 + b4 1200 + cts2 400x1,5 = 2600
-    #   OFF  b1 1200 + b2 900               = 2100  |  b3 800 + b4 1350               = 2150
+    #   ON   b1 800 + b2 900 + cts1 500x1,2 = 2300  |  b3 800 + b4 1050 + cts2 400x1,5 = 2450
+    #   OFF  b1 1000 + b2 900               = 1900  |  b3 800 + b4 1200               = 2000
     #
-    # A diferenca (850) e a area que so os coletores alcancavam, com o potencial deles —
-    # e nenhum dos dois existe sem eles.
-    arq = _com_consolidado(CONSOLIDADO)
+    # Ligado tem mais universo porque o coletor tem potencial de crescimento e alcanca
+    # area que a sub-bacia inteira nao cobre; desligado, a area do coletor e da
+    # sub-bacia — e so ela.
+    arq = _com_colunas(COM_CTS)
     M = engine()
     on = silent(M.ler_banco, arq, usar_cts=True)
     off = silent(M.ler_banco, arq, usar_cts=False)
-    assert sum(on.max_lig.values()) == pytest.approx(5100.0)
-    assert sum(off.max_lig.values()) == pytest.approx(4250.0)
+    assert sum(on.max_lig.values()) == pytest.approx(4750.0)
+    assert sum(off.max_lig.values()) == pytest.approx(3900.0)
 
 
-def test_sem_a_coluna_usa_a_exclusiva_e_ALERTA(capsys):
-    """Sem a coluna nao ha o que ler, e o motor NAO inventa.
+def test_sem_cts_a_coluna_com_cts_e_ignorada():
+    # Ela so descreve o cenario COM coletor. Sem ele, a sub-bacia e a inteira — a mesma
+    # com ou sem a coluna na linha.
+    arq = _com_colunas(COM_CTS)
+    M = engine()
+    off_com = silent(M.ler_banco, arq, usar_cts=False)
+    off_sem = silent(M.ler_banco, banco(BANK_CTS), usar_cts=False)
+    assert sum(off_com.max_lig.values()) == pytest.approx(sum(off_sem.max_lig.values()))
+    assert off_com.sub_receita["b1"]["ticket"] == pytest.approx(180000 / 400)
 
-    A versao anterior somava a linha da CTS aqui. Era o que contava a area sobreposta
-    duas vezes — e o que fazia o universo da meta crescer sozinho ao desligar o coletor.
-    Base que ainda nao tem a coluna produz uma rodada que ignora a area sobreposta, e o
-    ALERTA diz exatamente isso: e um numero a menos, nao um numero errado em silencio.
+
+def test_sem_a_coluna_a_sub_bacia_entra_inteira_e_ALERTA(capsys):
+    """Sem a coluna nao ha o que ler, e o motor NAO inventa: a sub-bacia entra inteira.
+
+    Com o coletor isso conta a area dele duas vezes — e o ALERTA diz exatamente isso: e
+    um numero a mais declarado, nao um numero errado em silencio.
     """
     M = engine()
-    off = M.ler_banco(banco(BANK_CTS), usar_cts=False)
+    on = M.ler_banco(banco(BANK_CTS), usar_cts=True)
     saida = capsys.readouterr().out
-    assert "usou o universo EXCLUSIVO" in saida
-    cid = off.nos["b1"].cidade
-    assert off.max_lig[cid] == pytest.approx(1900.0)   # 1000 (b1) + 900 (b2), so as sub-bacias
+    assert "conta duas vezes" in saida
+    cid = on.nos["b1"].cidade
+    assert on.max_lig[cid] == pytest.approx(2500.0)   # 1000 (b1) + 900 (b2) + 600 (cts1)
 
 
-def test_com_cts_ligada_a_coluna_consolidada_e_ignorada():
-    # Ela so descreve o cenario SEM coletor. Com ele, a sub-bacia usa o que e exclusivo
-    # dela e a CTS entra como no proprio — a sobreposicao esta nos numeros da CTS.
-    arq = _com_consolidado(CONSOLIDADO)
+def test_com_cts_vazia_e_coletor_por_perto_a_sub_bacia_vale_zero(capsys):
+    """`_com_cts` vazia numa sub-bacia pareada e "a CTS levou tudo" — Nilopolis tem seis
+    assim. Ela entra com zero, e nao com a inteira: a inteira e o coletor de novo."""
+    vazia = {"b1": {k: None for k in COM_CTS["b1"]}, "b4": COM_CTS["b4"]}
     M = engine()
-    on_com = silent(M.ler_banco, arq, usar_cts=True)
-    on_sem = silent(M.ler_banco, banco(BANK_CTS), usar_cts=True)
-    assert sum(on_com.max_lig.values()) == pytest.approx(sum(on_sem.max_lig.values()))
+    on = M.ler_banco(_com_colunas(vazia), usar_cts=True)
+    saida = capsys.readouterr().out
+    assert "levou a area inteira" in saida
+    cid = on.nos["b1"].cidade
+    assert on.max_lig[cid] == pytest.approx(1500.0)   # 0 (b1) + 900 (b2) + 600 (cts1)
+    assert on.sub_receita["b1"]["ticket"] == 0.0
+
+
+def test_com_cts_vazia_SEM_coletor_por_perto_fica_a_inteira():
+    """b2 nao esta pareada e nao ha CTS na cidade dela (a fixture nao tem cidade nas
+    CTS): a coluna vazia e so coluna nao preenchida, e vale a sem sufixo."""
+    vazia = {"b2": {"universo_ligacoes_com_cts": None}}
+    M = engine()
+    on = silent(M.ler_banco, _com_colunas(vazia), usar_cts=True)
+    cid = on.nos["b2"].cidade
+    assert on.max_lig[cid] == pytest.approx(2500.0)   # 1000 (b1) + 900 (b2) + 600 (cts1)
+
+
+def test_as_novas_derivam_das_colunas_lidas():
+    """`*_novas_obras` e derivado (universo - atuais) das colunas que ficaram na linha:
+    b1 tem 600 na linha inteira (1000 - 400); com o coletor sobram 800 - 350 = 450 para
+    as obras dela habilitarem, e o resto e da CTS."""
+    M = engine()
+    on = silent(M.ler_banco, _com_colunas(COM_CTS), usar_cts=True)
+    lig_b1 = next(o for o in on.obras.values() if o.no == "b1" and o.tipo == "coleta")
+    assert lig_b1.lig == pytest.approx(450.0)
+    off = silent(M.ler_banco, _com_colunas(COM_CTS), usar_cts=False)
+    lig_b1 = next(o for o in off.obras.values() if o.no == "b1" and o.tipo == "coleta")
+    assert lig_b1.lig == pytest.approx(600.0)

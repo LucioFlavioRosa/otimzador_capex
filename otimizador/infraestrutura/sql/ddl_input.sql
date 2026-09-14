@@ -162,8 +162,10 @@ CREATE TABLE IF NOT EXISTS input.subbacia_operacional (
     ligacoes_atuais_residencial     integer,
     universo_economias_residencial  integer,
     economias_atuais_residencial    integer,
-    -- O que a sub-bacia atende QUANDO A CTS NAO EXISTE: o exclusivo dela mais a area
-    -- sobreposta com o coletor. So a sub-bacia tem estas colunas; a CTS nao precisa.
+    -- A sub-bacia COM A CTS CONSIDERADA A PARTE: so o que nao e area do coletor (a coluna
+    -- sem sufixo e a sub-bacia inteira). Vazia quando a CTS levou tudo. E o que o motor
+    -- le com `usar_cts=True`; sem a CTS, le a sem sufixo. So a sub-bacia tem estas
+    -- colunas; a CTS nao precisa. (Semantica da planilha do Databricks, 09/2026.)
     universo_ligacoes_com_cts               integer,
     ligacoes_atuais_com_cts                 integer,
     universo_economias_com_cts              integer,
@@ -171,12 +173,14 @@ CREATE TABLE IF NOT EXISTS input.subbacia_operacional (
     universo_ligacoes_residencial_com_cts   integer,
     ligacoes_atuais_residencial_com_cts     integer,
     universo_economias_residencial_com_cts  integer,
-    economias_atuais_residencial_com_cts    integer
+    economias_atuais_residencial_com_cts    integer,
+    receita_faturada_media_mensal_com_cts   double precision,
+    receita_arrecadada_media_mensal_com_cts double precision
 );
 COMMENT ON COLUMN input.subbacia_operacional.universo_ligacoes_com_cts IS
-    'O que a sub-bacia atende SEM a CTS: exclusivo dela + area sobreposta com o coletor. '
-    'NAO e a soma das duas linhas — somar conta a sobreposicao duas vezes. Lida so quando '
-    'a rodada tem usar_cts=false; com a CTS ligada, a sobreposicao esta nos numeros dela.';
+    'A sub-bacia COM a CTS considerada a parte: so o que nao e area do coletor (a coluna sem '
+    'sufixo e a sub-bacia inteira). Vazia quando a CTS levou tudo. Lida quando a rodada tem '
+    'usar_cts=true; sem a CTS, a sub-bacia inteira atende a area do coletor.';
 COMMENT ON COLUMN input.subbacia_operacional.universo_ligacoes_residencial IS
     'PARCELA residencial, JA CONTIDA no total, e MEDIDA (nao derivada). As colunas sem '
     'sufixo sao o TOTAL = residencial + industrial. Nunca somar as duas.';

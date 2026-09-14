@@ -27,18 +27,18 @@ O que quebraria em silêncio se ninguém travasse:
 - *(solver, slow)* **Separabilidade por cidade é exata** — a decomposição fecha em ~zero. Este
   é o teste que **pula** por falta da suíte legada.
 
-## 5.2 `test_cts.py` — CTS ligada × desligada (13 testes)
+## 5.2 `test_cts.py` — CTS ligada × desligada (16 testes)
 
 A CTS pode entrar como nó próprio (`USAR_CTS=True`) ou não entrar (`False`). Para a sub-bacia,
 a **única** diferença entre os dois é qual coluna é lida:
 
-| rodada | quem atende a área sobreposta | o que a sub-bacia lê |
+| rodada | quem atende a área do coletor | o que a sub-bacia lê |
 |---|---|---|
-| `True` | a CTS, com as obras dela | as colunas exclusivas |
-| `False` | a sub-bacia | as oito `*_com_cts` (exclusivo + sobreposta) |
+| `True` | a CTS, com as obras dela | as dez `*_com_cts` (a sub-bacia com a CTS à parte) |
+| `False` | a sub-bacia | as colunas sem sufixo (a sub-bacia inteira) |
 
-Nada é somado da linha da CTS. **Vazão, receita e população são dado da sub-bacia**: se desligar
-o coletor muda a vazão dela, quem atualiza a base é quem cadastra.
+Nada é somado da linha da CTS. **Vazão e população são dado da sub-bacia** nos dois modos: se
+desligar o coletor muda a vazão dela, quem atualiza a base é quem cadastra.
 
 O que os testes fixam:
 
@@ -47,8 +47,13 @@ O que os testes fixam:
 | desligado atende **menos** — a área que só o coletor alcançava fica sem atendimento | `test_desligado_atende_menos_que_ligado` |
 | o universo efetivo do desligado é o da sub-bacia, com o potencial dela | `test_universo_efetivo_do_desligado_e_o_da_sub_bacia` |
 | vazão **não** é mais somada; a diferença é exatamente a das CTS | `test_vazao_NAO_e_mais_somada` |
-| sem a coluna consolidada, usa a exclusiva e **alerta** | `test_sem_a_coluna_usa_a_exclusiva_e_ALERTA` |
-| com a CTS ligada, a coluna consolidada é ignorada | `test_com_cts_ligada_a_coluna_consolidada_e_ignorada` |
+| com a CTS, a sub-bacia lê `_com_cts` — ligações e receita | `test_com_cts_a_sub_bacia_le_a_coluna_com_cts` |
+| a área do coletor é contada uma vez em cada cenário | `test_a_area_do_coletor_e_contada_uma_vez_em_cada_cenario` |
+| sem a CTS, a coluna `_com_cts` é ignorada | `test_sem_cts_a_coluna_com_cts_e_ignorada` |
+| sem a coluna, a sub-bacia entra inteira e **alerta** | `test_sem_a_coluna_a_sub_bacia_entra_inteira_e_ALERTA` |
+| `_com_cts` vazia com CTS por perto vale zero | `test_com_cts_vazia_e_coletor_por_perto_a_sub_bacia_vale_zero` |
+| `_com_cts` vazia sem CTS por perto fica a inteira | `test_com_cts_vazia_SEM_coletor_por_perto_fica_a_inteira` |
+| as ligações novas derivam das colunas lidas | `test_as_novas_derivam_das_colunas_lidas` |
 | ligado tem 4 obras a mais por CTS, e CAPEX maior no valor exato das obras dela | `test_ligado_tem_quatro_obras_a_mais_por_cts` |
 
 O **VPL** não tem sentido fixado: sem o coletor, as ligações que ele atenderia passam a ser
