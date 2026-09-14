@@ -187,15 +187,18 @@ economicamente ótima e ainda assim ficar de fora: o elo que trava está em outr
 rateado entre elas na proporção da vazão. As frações de cada obra **somam exatamente 1** — o
 portão de qualidade checa isso (desvio < 1e-6).
 
-**CTS (Coletor de Tempo Seco)** — estrutura irmã da sub-bacia, pareada 1:1. Com
-`USAR_CTS=True` ela vira um nó próprio com 4 obras (coletor, tronco, EEE, linha de recalque)
-e atende a área que se sobrepõe à sub-bacia. Com `False` ela não entra: as obras dela ficam de
-fora e a sub-bacia lê as colunas `*_com_cts` (o que é exclusivo dela **mais** a área sobreposta).
+**CTS (Coletor de Tempo Seco)** — estrutura irmã da sub-bacia. A sub-bacia chega com duas
+versões de cada medida de ligação, economia e receita: a coluna **sem sufixo** é a sub-bacia
+inteira, sem considerar a CTS (a área do coletor está dentro); a **`*_com_cts`** é a
+sub-bacia com a CTS considerada à parte — só o que não é área do coletor, vazia quando ele
+levou tudo. Com `USAR_CTS=True` a CTS vira um nó próprio com 4 obras (coletor, tronco, EEE,
+linha de recalque) e a sub-bacia lê as `*_com_cts`; com `False` ela não entra, e a sub-bacia
+inteira (sem sufixo) responde pela área. A sobreposição é contada uma vez em cada cenário.
 
-**Os dois modos não são a mesma demanda.** Sem o coletor, a parte da área que só ele alcançava
-não é atendida por ninguém — o universo da meta é menor, e é assim que tem de ser. Vazão,
-receita e população são dado da sub-bacia e não são herdadas da linha da CTS: se desligar o
-coletor muda a vazão dela, quem atualiza a base é quem cadastra. 13 testes fixam isso.
+**Os dois modos não são a mesma demanda.** Com o coletor há o potencial de crescimento dele e a
+área que só ele alcança; sem ele, a área é da sub-bacia e só dela. Vazão e população não têm
+versão `_com_cts` e são dado da sub-bacia nos dois modos: se desligar o coletor muda a vazão
+dela, quem atualiza a base é quem cadastra. 16 testes fixam isso.
 
 **ETE faseada** (`ETE_FASEADA`) — quando ligada, cada ETE vira K obras-módulo, priorizáveis
 individualmente, e a capacidade cresce com o fluxo. Muda a **cardinalidade do problema**, não

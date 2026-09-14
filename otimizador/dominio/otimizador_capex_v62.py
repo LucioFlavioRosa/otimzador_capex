@@ -981,20 +981,37 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         # A REGUA VEM DO PARAMETRO DA RODADA, e nao mais da cidade: ela e uma so
         # para a unidade inteira, entao esta pergunta nao depende da sub-bacia.
         return not str(unidade_cobertura or "ligacoes").strip().lower().startswith("pop")
-    # ---- CTS DESLIGADA: o que a sub-bacia absorve ---------------------------------
-    # As colunas de LIGACAO e ECONOMIA da sub-bacia sao o que pertence EXCLUSIVAMENTE a
-    # ela. A CTS cobre uma area que se SOBREPOE a essa — e a sobreposicao e contada uma
-    # vez so, na entidade que a atende em cada cenario:
+    # ---- QUAL COLUNA A SUB-BACIA LE, com e sem CTS ---------------------------------
+    # A sub-bacia chega da origem com DUAS versoes de cada medida de ligacao/economia/
+    # receita: a coluna sem sufixo e a `*_com_cts`. A semantica e a da planilha do
+    # Databricks (PORTFOLIO_INVEST_CAPEX_SUBBACIAS, conferida em 09/2026 contra a de CTS):
     #
-    #   usar_cts=True   a CTS atende a sobreposicao; ela esta nos numeros da CTS, que
-    #                   entra como no proprio. A sub-bacia usa as colunas exclusivas.
-    #   usar_cts=False  o coletor nao existe; quem atende a sobreposicao e a sub-bacia,
-    #                   e o total dela vem das colunas `*_com_cts` — exclusiva + sobreposta.
+    #   sem sufixo   a sub-bacia INTEIRA, sem considerar a CTS — a area que o coletor
+    #                atende esta dentro. E o numero MAIOR (ou igual, onde nao ha CTS).
+    #   `*_com_cts`  a sub-bacia COM A CTS CONSIDERADA A PARTE: so o que nao e area do
+    #                coletor. Vazia quando a CTS absorveu a sub-bacia inteira.
     #
-    # POR QUE NAO SOMAR AS DUAS LINHAS, que era o que se fazia: a ligacao da area
-    # sobreposta esta nas duas, entao a soma a CONTA DUAS VEZES. O universo da meta
-    # crescia sozinho ao desligar a CTS, e a cobertura piorava sem nenhuma obra ter
-    # mudado. As colunas `_com_cts` vem da origem ja consolidadas e nao tem esse defeito.
+    # A prova esta nos numeros: em cidade sem CTS as duas colunas sao iguais em 411 de 413
+    # sub-bacias; em Mesquita e no Rio, (sem sufixo - com_cts) somado pela cidade e
+    # EXATAMENTE o total de ligacoes das CTS da cidade; em Nilopolis, onde 9 CTS cobrem a
+    # cidade, `_com_cts` fica em 6, 18 e vazio.
+    #
+    # A sobreposicao e contada UMA VEZ SO, na entidade que a atende em cada cenario:
+    #
+    #   usar_cts=True   a CTS atende a area dela e entra como no proprio, com a linha
+    #                   dela. A sub-bacia le `*_com_cts` — o que sobra para ela.
+    #   usar_cts=False  o coletor nao existe; a area e responsabilidade da sub-bacia,
+    #                   que le as colunas sem sufixo. Nada a trocar.
+    #
+    # ATE 09/2026 ERA O CONTRARIO — a sub-bacia lia a sem sufixo com o coletor e a
+    # `_com_cts` sem ele —, porque o mock foi montado com `_com_cts` = exclusiva + area
+    # do coletor. Com a planilha real isso contava a area da CTS DUAS VEZES com o coletor
+    # (na CTS e na sub-bacia) e a DESCARTAVA sem ele. O mock foi virado junto.
+    #
+    # RECEITA ENTRA NA TROCA. A origem manda `MED_12M_*_COM_CTS` tambem, e pela mesma razao:
+    # com o coletor, a receita da area dele esta na linha da CTS; deixar a sub-bacia com a
+    # receita inteira faturaria a area duas vezes. Vazao e populacao NAO tem versao
+    # `_com_cts` e sao dado da sub-bacia: o motor nao as arbitra para nenhum cenario.
     _CTS_CONSOLIDADO=[("universo_ligacoes","universo_ligacoes_com_cts"),
                       ("ligacoes_atuais","ligacoes_atuais_com_cts"),
                       ("universo_economias","universo_economias_com_cts"),
@@ -1002,48 +1019,47 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                       (_COB_LIG[0],"universo_ligacoes_residencial_com_cts"),
                       (_COB_LIG[1],"ligacoes_atuais_residencial_com_cts"),
                       (_COB_ECO[0],"universo_economias_residencial_com_cts"),
-                      (_COB_ECO[1],"economias_atuais_residencial_com_cts")]
-    # NADA MAIS E SOMADO. Vazao, receita e populacao sao DADO da sub-bacia, e o motor nao
-    # inventa o valor delas para o cenario sem coletor: se desligar a CTS muda a vazao,
-    # quem atualiza a base e quem cadastra. A escolha de considerar ou nao a CTS nao mexe
-    # em receita.
-    #
-    # Era isto que a versao anterior fazia, e o defeito e visivel agora que as ligacoes
-    # deixaram de ser somadas: a linha da CTS entrava inteira em vazao/receita/populacao,
-    # enquanto as ligacoes vinham da coluna consolidada — duas moedas diferentes na mesma
-    # sub-bacia. Somar tambem contava a area sobreposta duas vezes.
-    #
-    # O QUE ISSO CUSTA, DECLARADO: sem o coletor, a vazao que a sub-bacia manda para a ETE
-    # e a que estiver na base dela. Se a base nao tiver sido atualizada para esse cenario,
-    # a ETE e dimensionada sem o esgoto que vinha pelo coletor.
-    _absorvidas=[]; _sem_consolidado=[]        # so o modo desligado preenche
-    if usar_cts:                                   # LIGADO: CTS entra como no proprio (dados operacionais)
+                      (_COB_ECO[1],"economias_atuais_residencial_com_cts"),
+                      ("receita_faturada_media_mensal","receita_faturada_media_mensal_com_cts"),
+                      ("receita_arrecadada_media_mensal","receita_arrecadada_media_mensal_com_cts")]
+    # AS LIGACOES NOVAS NAO PRECISAM DE VERSAO `_com_cts`: `*_novas_obras` e DERIVADO mais
+    # abaixo como universo - atuais das colunas que ficaram na linha. Com o coletor, a
+    # sub-bacia encolheu e as novas encolhem junto; sem o teto que isso da, a area do
+    # coletor seria "habilitada" duas vezes — pela obra da CTS e pela da sub-bacia.
+    _absorvidas=[]; _sem_consolidado=[]; _zeradas=[]      # so o modo LIGADO preenche
+    if usar_cts:                                   # LIGADO: CTS entra como no proprio, sub-bacia le `_com_cts`
         for _c,_row in _cts_op.items(): subop[_c]=_row
-    else:                                          # DESLIGADO: a sub-bacia le as colunas consolidadas
-        # A UNICA DIFERENCA PARA A SUB-BACIA E QUAL COLUNA E LIDA. Nada e somado, nada e
-        # ponderado, nada e derivado: as oito colunas `*_com_cts` substituem as exclusivas
-        # e o resto da ficha — vazao, receita, populacao, potencial — fica como esta.
-        #
-        # Vazao, receita e populacao sao DADO da sub-bacia. Se desligar o coletor muda a
-        # vazao dela, quem atualiza a base e quem cadastra; o motor nao arbitra o numero.
-        # E a escolha nao mexe em receita.
-        # As duas listas sao do BANCO INTEIRO — `subop` so e filtrado pela unidade mais
-        # adiante. Elas viram aviso la embaixo, ja recortadas por `cen.nos`: dizer "337
-        # sub-bacias" numa unidade que tem 186 (ou nenhuma) e ruido que ensina a ignorar
-        # aviso. A linha `[info] CTS:` ao lado sempre fez esse recorte certo.
-        for _sb,_c in _cts_dep.items():
-            if _sb not in subop or _c not in _cts_op: continue
-            _s=subop[_sb]
-            if _s.get(_CTS_CONSOLIDADO[0][1]) in (None,""):
-                # SEM A COLUNA nao ha o que ler, e o motor NAO inventa: fica a exclusiva.
-                # A versao anterior somava a linha da CTS aqui, e era isso que contava a
-                # area sobreposta duas vezes. Base que ainda nao tem a coluna produz uma
-                # rodada sem CTS que ignora a demanda do coletor — e o aviso diz isso.
-                _sem_consolidado.append(_sb)
+        # `_com_cts` VAZIA numa sub-bacia que TEM coletor por perto — pareada em
+        # `subbacia-cts`, ou na cidade de alguma CTS — e "a CTS levou tudo", e vale ZERO:
+        # em Nilopolis sao 6 sub-bacias assim, cada uma do tamanho de uma CTS. Vazia numa
+        # sub-bacia sem CTS por perto e so a coluna nao preenchida: fica a sem sufixo, que
+        # e igual por construcao. A distincao importa porque a carga real nao traz o par
+        # sub-bacia<->CTS (`subbacia-cts` vem vazia), so a cidade.
+        _cid_com_cts={_r.get("cidade_id") for _r in _cts_op.values() if _r.get("cidade_id")}
+        for _sb,_s in subop.items():
+            if _sb in _cts_op: continue
+            if not any(_tot in _s for _exc,_tot in _CTS_CONSOLIDADO):
+                # BASE SEM AS COLUNAS (anterior a elas): nao ha o que ler, e o motor NAO
+                # inventa — fica a sub-bacia inteira. Pareada com CTS, isso conta a area
+                # do coletor duas vezes, e o ALERTA la embaixo diz exatamente isso.
+                if _sb in _cts_dep and _cts_dep[_sb] in _cts_op: _sem_consolidado.append(_sb)
                 continue
+            _perto=(_sb in _cts_dep and _cts_dep[_sb] in _cts_op) or (_s.get("cidade_id") in _cid_com_cts)
+            _vazia=_s.get(_CTS_CONSOLIDADO[0][1]) in (None,"")
+            if _vazia and not _perto: continue
+            _mudou=False
             for _exc,_tot in _CTS_CONSOLIDADO:
-                if _s.get(_tot) not in (None,""): _s[_exc]=num(_s.get(_tot))
-        _absorvidas=[_sb for _sb,_c in _cts_dep.items() if _sb in subop and _c in _cts_op]
+                if _s.get(_tot) not in (None,""): _novo=num(_s.get(_tot))
+                elif _perto: _novo=0.0             # a CTS levou tudo: nada sobra, nem receita
+                else: continue
+                if abs(_novo-num(_s.get(_exc)))>1e-9: _mudou=True
+                _s[_exc]=_novo
+            # Para o [info] e para a conferencia das novas: so quem de fato mudou de numero.
+            # Longe de coletor as duas colunas sao iguais, e a troca nao e noticia.
+            if _vazia: _zeradas.append(_sb)
+            elif _mudou: _absorvidas.append(_sb)
+    # DESLIGADO: nada a trocar — a sub-bacia inteira e a coluna sem sufixo, que e a que
+    # o resto da leitura ja usa. As obras da CTS ficam de fora la embaixo.
     # ---- UNIDADES ----------------------------------------------------------------
     # LIGACOES e ECONOMIAS vem SEMPRE da base comercial (Databricks) para toda sub-bacia.
     # POPULACAO e opcional e entra por input do usuario, quando precisa.
@@ -1114,6 +1130,9 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     # Regra nova: ligacoes/economias/populacao "novas das obras" = universo - atuais (piso 0).
     # Cobre sub-bacia e CTS (ja mescladas no subop). Se o banco trouxer a coluna, vira CONFERENCIA
     # (prevalece o derivado) e a engine avisa quando divergir.
+    # A CONFERENCIA NAO VALE PARA QUEM LEU `_com_cts`: a coluna do banco descreve a sub-bacia
+    # inteira, e com o coletor a sub-bacia encolheu — divergir e o esperado, nao um aviso.
+    _trocadas=set(_absorvidas)|set(_zeradas)
     _nov_div=[]
     for _sbk,_d in subop.items():
         for _un,_at,_nv in (("universo_ligacoes","ligacoes_atuais","ligacoes_novas_obras"),
@@ -1127,7 +1146,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
             if _d.get(_un) in (None,"") or _d.get(_at) in (None,""): continue
             _der=max(0.0, num(_d.get(_un))-num(_d.get(_at)))
             _antigo=_d.get(_nv)
-            if _antigo is not None and str(_antigo).strip()!="" and abs(num(_antigo)-_der)>1.0:
+            if _antigo is not None and str(_antigo).strip()!="" and abs(num(_antigo)-_der)>1.0 and _sbk not in _trocadas:
                 _nov_div.append((_sbk,_nv,num(_antigo),_der))
             _d[_nv]=_der
     if _nov_div:
@@ -1536,17 +1555,20 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         # "demanda somada", e somar era exatamente o que passou a NAO acontecer quando ha
         # coluna consolidada. Log que descreve o codigo antigo e pior que log nenhum.
         print(f"  [info] CTS: {len(_cts_na_uni)} nesta unidade ({len(_cts_ids_all)} no banco) -> usar_cts={usar_cts} "
-              f"({'entram como nos proprios' if usar_cts else 'a sub-bacia absorve a pareada (colunas *_com_cts)'})")
+              f"({'entram como nos proprios; a sub-bacia le as colunas *_com_cts' if usar_cts else 'ficam de fora; a sub-bacia inteira (colunas sem sufixo) atende a area delas'})")
     # RECORTADOS PELA UNIDADE. `cen.nos` e o mesmo filtro que a linha acima usa — sem ele
     # o aviso falaria do banco inteiro, inclusive numa unidade sem CTS nenhuma.
     _abs_uni=[_sb for _sb in _absorvidas if _sb in cen.nos]
+    _zer_uni=[_sb for _sb in _zeradas if _sb in cen.nos]
     _sem_uni=[_sb for _sb in _sem_consolidado if _sb in cen.nos]
     if _abs_uni:
-        print(f"  [aviso] {len(_abs_uni)} sub-bacia(s) desta unidade com CTS pareada: sem o coletor, "
-              f"VAZAO, RECEITA e POPULACAO usadas sao as da BASE DA SUB-BACIA — a linha da CTS nao "
-              f"entra. Se desligar o coletor muda a vazao, a base precisa refletir isso.")
+        print(f"  [info] {len(_abs_uni)} sub-bacia(s) desta unidade leram as colunas *_com_cts (ligacoes, "
+              f"economias e receita SEM a area do coletor). VAZAO e POPULACAO sao as da base da sub-bacia.")
+    if _zer_uni:
+        print(f"  [aviso] {len(_zer_uni)} sub-bacia(s) desta unidade com `*_com_cts` VAZIA e CTS por perto: "
+              f"a CTS levou a area inteira, e elas entram com ZERO ligacoes e receita. Ex.: {_zer_uni[:3]}")
     if _sem_uni:
-        print(f"  [ALERTA] {len(_sem_uni)} sub-bacia(s) desta unidade com CTS pareada mas SEM "
-              f"`universo_ligacoes_com_cts`: a rodada sem coletor usou o universo EXCLUSIVO delas, "
-              f"ou seja, ignorou a area sobreposta. Ex.: {_sem_uni[:3]}")
+        print(f"  [ALERTA] {len(_sem_uni)} sub-bacia(s) desta unidade com CTS pareada mas SEM as colunas "
+              f"`*_com_cts`: com o coletor, a sub-bacia entrou INTEIRA — a area do coletor conta duas "
+              f"vezes. Ex.: {_sem_uni[:3]}")
     return cen
