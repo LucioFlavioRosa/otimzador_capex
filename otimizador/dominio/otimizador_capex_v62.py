@@ -1040,16 +1040,26 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         # diferenca decide se a sub-bacia vale zero ou inteira. Dois sinais, nesta ordem:
         #
         #   1. O PAR em `subbacia-cts`: preciso. Pareada e vazia -> a CTS levou tudo.
-        #   2. A CIDADE, so quando a carga NAO traz par nenhum: e o unico sinal que a
+        #   2. A CIDADE, so onde a carga NAO traz par nenhum: e o unico sinal que a
         #      planilha do Databricks da (ela nao tem a coluna do par). Vazia na cidade de
         #      uma CTS -> a CTS levou tudo.
         #
-        # Com os pares presentes a cidade NAO decide: uma sub-bacia sem par que divide a
-        # cidade com um coletor e vem vazia e coluna nao preenchida, e entra INTEIRA — com
+        # ONDE ha par, a cidade NAO decide: uma sub-bacia sem par que divide a cidade com
+        # um coletor pareado e vem vazia e coluna nao preenchida, e entra INTEIRA — com
         # aviso. Zera-la pelo vizinho apagaria do plano uma sub-bacia que nada tem a ver
-        # com ele. Sem par nenhum na carga nao ha como distinguir, e vale a cidade.
+        # com ele. Onde nao ha par nenhum, nao ha como distinguir, e vale a cidade.
+        #
+        # "ONDE" E POR CIDADE, e nao pelo banco inteiro. O motor recebe o schema inteiro
+        # (`carregar_postgres` faz `SELECT *`; a unidade so e recortada adiante), e uma
+        # carga pode trazer pares para umas cidades e nenhum para outras — Rio e Mesquita
+        # pareadas pela conferencia de 09/2026, Nilopolis so pela cidade. Decidir pelo
+        # banco inteiro faria a presenca de um par no Rio desligar o sinal de Nilopolis.
         _cid_com_cts={_r.get("cidade_id") for _r in _cts_op.values() if _r.get("cidade_id")}
-        _ha_pares=any(_c in _cts_op for _c in _cts_dep.values())
+        _cid_com_pares=set()
+        for _sb,_c in _cts_dep.items():
+            if _c not in _cts_op: continue
+            for _cid in (_cts_op[_c].get("cidade_id"), (subop.get(_sb) or {}).get("cidade_id")):
+                if _cid: _cid_com_pares.add(_cid)
         for _sb,_s in subop.items():
             if _sb in _cts_op: continue
             _pareada=(_sb in _cts_dep and _cts_dep[_sb] in _cts_op)
@@ -1059,7 +1069,8 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                 # do coletor duas vezes, e o ALERTA la embaixo diz exatamente isso.
                 if _pareada: _sem_consolidado.append(_sb)
                 continue
-            _pela_cidade=(not _ha_pares) and (_s.get("cidade_id") in _cid_com_cts)
+            _cid=_s.get("cidade_id")
+            _pela_cidade=(_cid in _cid_com_cts) and (_cid not in _cid_com_pares)
             _perto=_pareada or _pela_cidade
             _vazia=_s.get(_CTS_CONSOLIDADO[0][1]) in (None,"")
             if _vazia and not _perto:

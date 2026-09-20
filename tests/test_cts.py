@@ -263,9 +263,10 @@ def test_a_area_do_coletor_e_contada_UMA_vez_o_universo_da_unidade_e_o_mesmo_nos
     off = silent(M.ler_banco, _sem_potencial(_com_colunas(COM_CTS_EXATA)), usar_cts=False)
     assert sum(on.max_lig.values()) == pytest.approx(3900.0)
     assert sum(off.max_lig.values()) == pytest.approx(3900.0)
-    # E o ticket da b1 e o da parte que sobrou para ela: 90.000 / 200 com o coletor,
-    # 180.000 / 400 sem — o mesmo por ligacao, porque a fixture reparte na proporcao.
-    assert on.sub_receita["b1"]["ticket"] == pytest.approx(off.sub_receita["b1"]["ticket"])
+    # O ticket da b1 e o da parte que sobrou para ela: 90.000 / 200 com o coletor. (Nao e
+    # invariante que ele iguale o de sem coletor — a fixture reparte a receita na
+    # proporcao das ligacoes, e por isso aqui coincide; na base real nao precisa.)
+    assert on.sub_receita["b1"]["ticket"] == pytest.approx(90000 / 200)
 
 
 def _com_cidade(abas):
@@ -291,6 +292,25 @@ def test_com_os_pares_na_carga_a_cidade_NAO_zera_a_sub_bacia_sem_par(capsys):
     saida = capsys.readouterr().out
     assert on.max_lig[on.nos["b2"].cidade] == pytest.approx(2300.0)   # 800 (b1) + 900 (b2) + 600 (cts1)
     assert "SEM CTS pareada" in saida and "b2" in saida
+
+
+def test_o_escopo_do_par_e_a_CIDADE_e_nao_o_banco_inteiro(capsys):
+    """Uma carga com par numa cidade e nenhum na outra (Rio pareado, Nilopolis so pela
+    cidade). Na cidade COM par, a vazia sem par entra inteira; na cidade SEM par nenhum,
+    a cidade decide e a vazia e zerada. Decidir pelo banco inteiro faria o par do Rio
+    desligar o sinal de Nilopolis."""
+    abas = _com_colunas({"b1": COM_CTS["b1"],
+                         "b2": {"universo_ligacoes_com_cts": None},
+                         "b4": {k: None for k in COM_CTS["b4"]}})
+    abas = _com_cidade(abas)
+    abas["subbacia-cts"] = [p for p in abas["subbacia-cts"] if p["cts"] == "cts1"]   # so c1 tem par
+    M = engine()
+    on = M.ler_banco(abas, usar_cts=True)
+    saida = capsys.readouterr().out
+    assert on.max_lig[on.nos["b2"].cidade] == pytest.approx(2300.0)   # 800 (b1) + 900 (b2 inteira) + 600 (cts1)
+    assert on.max_lig[on.nos["b4"].cidade] == pytest.approx(1400.0)   # 800 (b3) + 0 (b4 zerada) + 600 (cts2)
+    assert "SEM CTS pareada" in saida and "b2" in saida
+    assert "sinal: cidade" in saida and "b4" in saida
 
 
 def test_sem_par_nenhum_na_carga_a_cidade_decide(capsys):
