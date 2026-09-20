@@ -142,6 +142,9 @@ CREATE TABLE IF NOT EXISTS input.cidade_operacional (
 -- aba do motor: subbacia-operacional
 CREATE TABLE IF NOT EXISTS input.subbacia_operacional (
     sub_bacia                       text PRIMARY KEY,
+    -- A cidade da sub-bacia. A carga grava; o motor le quando a base NAO traz o par
+    -- sub-bacia<->CTS: e o sinal de reserva para `*_com_cts` vazia (ver o motor).
+    cidade_id                       text,
     preco_por_ligacao               double precision,
     receita_faturada_media_mensal   double precision,
     receita_arrecadada_media_mensal double precision,
@@ -291,6 +294,9 @@ COMMENT ON TABLE input.fator_esgoto IS
 -- aba do motor: cts-operacional
 CREATE TABLE IF NOT EXISTS input.cts_operacional (
     cts                             text PRIMARY KEY,
+    -- A cidade da CTS: com `subbacia_operacional.cidade_id`, o sinal de reserva de
+    -- "coletor por perto" quando nao ha par em `subbacia_cts`.
+    cidade_id                       text,
     preco_por_ligacao               double precision,
     receita_faturada_media_mensal   double precision,
     receita_arrecadada_media_mensal double precision,
