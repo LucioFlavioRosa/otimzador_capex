@@ -128,6 +128,26 @@ def _md5(abas):
         return None
 
 
+def _md5_arquivo(caminho):
+    """MD5 do CONTEUDO do arquivo do motor (fingerprint de versao), gravado em
+    `run_meta.engine_md5` — responde "esta rodada usou o mesmo codigo de
+    motor que aquela?". Diferente de `_md5(abas)` acima, que hasheia o
+    CADASTRO (dict de abas), nao um caminho de arquivo — chamar `_md5` com
+    uma string sempre devolvia `None` (a string nao tem `.items()`, o
+    `except Exception` do `_md5` engolia o `AttributeError` em silencio).
+
+    `None` legitimo quando nao ha arquivo para hashear (motor sem
+    `__file__`, ex.: carregado de wheel/zip no Databricks) — e diferente de
+    erro, entao nao precisa logar nada."""
+    if not caminho:
+        return None
+    try:
+        with open(caminho, "rb") as f:
+            return _hl.md5(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
 def _ano_base(cen):
     ab = getattr(cen, "ano_base", None)
     return min(ab.values()) if ab else 2026
@@ -184,7 +204,7 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
         "data_hora": _dt.datetime.now().isoformat(timespec="seconds"),
         "engine": getattr(M, "__name__", None),
         "engine_arquivo": getattr(M, "__file__", None),
-        "engine_md5": _md5(getattr(M, "__file__", "") or ""),
+        "engine_md5": _md5_arquivo(getattr(M, "__file__", None)),
         "banco_arquivo": banco,
         "banco_md5": _md5(abas_fonte) if abas_fonte else None,
         "regional": reg,
@@ -747,6 +767,84 @@ def _spark():
         return None
 
 
+def _serializar_jsonb(df):
+    """Serializa em JSON (texto) os valores das colunas de
+    `publicacao.COLUNAS_JSONB` que ainda nao sao string.
+
+    Mesmo tratamento que `publicar_postgres` ja faz pro Postgres
+    (`publicacao.py`, dentro do laco de montagem das linhas — `v =
+    _js.dumps(v, ...)` quando `c in COLUNAS_JSONB and not isinstance(v,
+    str)`). `COLUNAS_JSONB` e por NOME de coluna, nao por tabela: em
+    `run_meta`, `peso_cidade` e um dict inteiro (todas as cidades); em
+    `run_cidade`, e um FLOAT por linha (o peso daquela cidade). Sem
+    serializar o valor primeiro, o Arrow tenta converter o float direto pro
+    StringType do schema (`_schema_spark` abaixo) e quebra —
+    `_schema_spark` so declara o TIPO, nao muda o CONTEUDO.
+
+    Devolve uma COPIA; nao muda o `df` original."""
+    from otimizador.infraestrutura.publicacao import COLUNAS_JSONB
+    import json as _json
+
+    cols = [c for c in df.columns if c in COLUNAS_JSONB]
+    if not cols:
+        return df
+    df = df.copy()
+    for c in cols:
+        df[c] = df[c].map(
+            lambda v: None if (not isinstance(v, (list, dict)) and pd.isna(v))
+            else (v if isinstance(v, str) else _json.dumps(v, ensure_ascii=False, default=str))
+        )
+    return df
+
+
+def _schema_spark(df):
+    """Monta um StructType explicito para `createDataFrame`, reusando
+    `publicacao.TIPOS_FIXOS`/`COLUNAS_JSONB` — a mesma fonte de verdade de
+    "qual e o tipo real desta coluna" que ja existe para o DDL do Postgres
+    (`publicacao._tipo_pg`).
+
+    Sem schema explicito, o Spark infere o tipo AMOSTRANDO OS VALORES. Uma
+    coluna 100% nula (comum em rodada pequena: sem obrigatoria, sem ETE
+    faseada, sem potencial residual, sem aviso de orcamento) vira NullType, e
+    o Parquet recusa gravar (`UNSUPPORTED_DATA_TYPE_FOR_DATASOURCE ... VOID`).
+    Ja aconteceu com `engine_md5`, `foco_cobertura` e `aviso_orcamento` — e
+    vai continuar acontecendo com qualquer outra coluna que puder ficar
+    totalmente nula numa rodada pequena. Corrigido aqui uma vez, no lugar de
+    remendar coluna por coluna."""
+    from pyspark.sql.types import (
+        BooleanType, DoubleType, LongType, StringType, StructField, StructType,
+        TimestampType,
+    )
+    from otimizador.infraestrutura.publicacao import COLUNAS_JSONB, TIPOS_FIXOS
+
+    pg_para_spark = {
+        "DOUBLE PRECISION": DoubleType(), "BIGINT": LongType(),
+        "BOOLEAN": BooleanType(), "TEXT": StringType(),
+        "JSONB": StringType(), "TIMESTAMPTZ": StringType(),
+    }
+    # "M" = datetime64[ns] (com ou sem timezone) — ex: `atualizado_em` das
+    # tabelas snapshot__* (copia congelada do input.*, onde a coluna e
+    # `timestamp with time zone` de verdade). Sem essa entrada, caia no
+    # default StringType() e o Arrow nao converte datetime pra string.
+    dtype_para_spark = {
+        "b": BooleanType(), "i": LongType(), "f": DoubleType(), "M": TimestampType(),
+    }
+
+    campos = []
+    for col in df.columns:
+        serie = df[col]
+        if col in COLUNAS_JSONB:
+            tipo = StringType()
+        elif col in TIPOS_FIXOS:
+            tipo = pg_para_spark.get(TIPOS_FIXOS[col], StringType())
+        elif serie.isna().all():
+            tipo = StringType()  # sem amostra e sem tipo conhecido: default seguro
+        else:
+            tipo = dtype_para_spark.get(serie.dtype.kind, StringType())
+        campos.append(StructField(col, tipo, True))
+    return StructType(campos)
+
+
 _RUN_ID_VALIDO = _re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
@@ -809,11 +907,34 @@ def _apagar_particao_spark(sp, base, rid):
     NOVOS dentro da particao — e reexecutar a mesma rodada duplicaria o parquet em
     vez de substitui-lo. Apagar diretorio so vale para formato de arquivo; num Delta
     isso corromperia o log da tabela, e por isso o Delta tem caminho proprio.
+
+    Usa `dbutils.fs`, nao `sp._jvm`/`sp._jsc` direto: acesso cru ao JVM do
+    driver e BLOQUEADO em cluster Shared/Unity Catalog
+    (`[JVM_ATTRIBUTE_NOT_SUPPORTED]`). `dbutils.fs` funciona nos dois modos
+    de acesso (Shared e Single User).
+
+    NOTA: `_delta_existe`, logo abaixo, tem o mesmo padrao antigo
+    (`sp._jvm`/`sp._jsc`) e vai bater no mesmo erro se algum dia for chamada
+    num cluster Shared — nao foi corrigida agora porque so entra em jogo com
+    `formato="delta"`, caminho que este projeto nao esta exercitando.
     """
-    p = sp._jvm.org.apache.hadoop.fs.Path(f"{base}/run_id={rid}")
-    fs = p.getFileSystem(sp._jsc.hadoopConfiguration())
-    if fs.exists(p):
-        fs.delete(p, True)
+    from pyspark.dbutils import DBUtils
+
+    db = DBUtils(sp)
+    caminho = f"{base}/run_id={rid}"
+    # so o "existe?" tolera falha-como-inexistente (dbutils.fs.ls levanta
+    # quando o caminho nao existe, nao ha um jeito limpo de distinguir isso
+    # de um erro real so pelo tipo da excecao). O `rm` em si fica SEM guarda:
+    # se a particao existe e o delete falhar por permissao/rede de verdade,
+    # o erro tem de propagar — engolir aqui esconderia exatamente a falha que
+    # esta funcao existe para evitar (particao antiga sobrevivendo e o
+    # `append` seguinte duplicando o parquet).
+    try:
+        existe = bool(db.fs.ls(caminho))
+    except Exception:
+        existe = False
+    if existe:
+        db.fs.rm(caminho, True)
 
 
 def _tabela_existe(sp, alvo):
@@ -869,7 +990,8 @@ def salvar(tabs, destino, formato="parquet", particionar_por_run=True, verbose=T
             continue
         base = str(destino).rstrip("/") + "/" + nome
         if sp is not None and (remoto or formato == "delta"):
-            sdf = sp.createDataFrame(df)
+            df_spark = _serializar_jsonb(df)
+            sdf = sp.createDataFrame(df_spark, schema=_schema_spark(df_spark))
             fmt = "delta" if formato == "delta" else formato
             particiona = particionar_por_run and "run_id" in df.columns
             w = sdf.write.format(fmt)
@@ -941,7 +1063,8 @@ def salvar_delta(tabs, schema, modo=None, particionar_por_run=True, verbose=True
         if df is None or len(df) == 0:
             continue
         alvo = f"{schema}.{nome}"
-        sdf = sp.createDataFrame(df)
+        df_spark = _serializar_jsonb(df)
+        sdf = sp.createDataFrame(df_spark, schema=_schema_spark(df_spark))
         particiona = particionar_por_run and "run_id" in df.columns
         w = sdf.write.format("delta").option("mergeSchema", "true")
         if modo is not None:
