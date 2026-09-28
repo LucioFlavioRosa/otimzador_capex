@@ -52,12 +52,30 @@ def test_vazao_NAO_muda():
     assert sum(off.vazao.values()) == pytest.approx(sum(on.vazao.values()))
 
 
-def test_receita_e_VPL_NAO_mudam():
-    # A invariante que separa esta versao da anterior. A mesma carteira de obras rende o
-    # mesmo, porque a industria continua faturando.
+def test_o_ticket_segue_a_regua_da_rodada_e_por_isso_a_receita_muda():
+    """O UNIVERSO DO TICKET E O UNIVERSO QUE A RODADA MEDE — decisao do dono do
+    produto em 28/09/2026.
+
+    Este teste afirmava o contrario ("receita e VPL NAO mudam com o recorte"), e a
+    troca e deliberada: com o recorte ligado o ticket passa a sair do universo
+    RESIDENCIAL, e um denominador menor da um ticket maior. Na fixture, b1 tem 1.000
+    ligacoes e 800 residenciais, e o ticket vai de 180,00 para 225,00 (+25%).
+
+    O EFEITO NO TOTAL, MEDIDO: receita 71.972.375 -> 80.599.719 (+12%) e VPL
+    29.357.901 -> 33.593.435 (+14%).
+
+    POR QUE SOBE, e nao desce: a receita da coluna e de TODAS as categorias, e as
+    ligacoes que o ticket multiplica (`ligacoes_novas_obras`) tambem sao todas —
+    so o denominador encolheu. Quem quiser a receita estavel entre os dois modos
+    tem de trocar tambem o multiplicador pela versao residencial
+    (`ligacoes_novas_obras_residencial`): medido, isso devolve 71.804.375, de novo
+    perto do modo sem recorte. E uma decisao de produto, e esta pendente.
+
+    O que NAO mudou: CAPEX e vazao seguem iguais entre os modos (os testes acima).
+    """
     on = build_all(load_classe(False)); off = build_all(load_classe(True))
-    assert sum(off.get("receita_ano", [])) == pytest.approx(sum(on.get("receita_ano", [])))
-    assert off["vpl"] == pytest.approx(on["vpl"])
+    assert sum(off.get("receita_ano", [])) > sum(on.get("receita_ano", []))
+    assert off["vpl"] > on["vpl"]
 
 
 # ---------------------------------------------------------------- cobertura por unidade

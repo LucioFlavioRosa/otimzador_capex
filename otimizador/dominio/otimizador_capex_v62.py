@@ -1233,16 +1233,19 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         # `_fator_esgoto`). Por isso o denominador e a base que FATURA AGUA, e nao a que
         # ja tem esgoto.
         #
-        # SEM VERSAO RESIDENCIAL de proposito: a receita da coluna e de todas as
-        # categorias, e o ticket multiplica `ligacoes_novas_obras` (total). Com o recorte
-        # residencial ligado, so a COBERTURA muda de moeda (`lig_cob`), nao a receita.
+        # O DENOMINADOR SEGUE A REGUA DA RODADA: com o recorte residencial ligado e a
+        # sub-bacia tendo a coluna, o universo e o RESIDENCIAL — a mesma escolha que
+        # `lig_cob` faz logo abaixo para a meta. Sem recorte, o universo total.
+        # Decisao do dono do produto (28/09/2026): o universo do ticket tem de ser o
+        # mesmo universo que a rodada esta medindo.
         #
-        # `_com_cts` ja esta resolvida: o bloco de consolidacao acima sobrescreve
-        # `universo_ligacoes` e as duas receitas na propria linha quando a rodada tem CTS.
+        # `_com_cts` ja esta resolvida nas duas versoes: o bloco de consolidacao acima
+        # sobrescreve `universo_ligacoes`, `universo_ligacoes_residencial` e as duas
+        # receitas na propria linha quando a rodada tem CTS.
         _rec_fat=num(so.get("receita_faturada_media_mensal"))
         _rec_arr=num(so.get("receita_arrecadada_media_mensal"))
         _rec_esc=_rec_fat if _BREC=="faturada" else _rec_arr
-        _la_tot=num(so.get("universo_ligacoes"))
+        _la_tot=num(so.get(_COB_LIG[0] if _usa_res(sb) else "universo_ligacoes"))
         _ticket_der=(_rec_esc/_la_tot) if _la_tot>1e-9 else 0.0
         lig_novas=max(0.0,num(so.get("ligacoes_novas_obras")))   # ligacoes habilitadas pelas OBRAS -> RECEITA
         # O que a obra conta para a META. Igual ao de cima sem recorte; com recorte, so as
@@ -1353,11 +1356,13 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         _rEsc=(num(_so.get("receita_faturada_media_mensal")) if _BREC=="faturada"
                else num(_so.get("receita_arrecadada_media_mensal")))
         # `atuais` e a base JA ATENDIDA (quem paga esgoto hoje); `ticket` e o da AGUA, e
-        # por isso sai pelas ligacoes TOTAIS, como o `_ticket_der` la acima. O efeito-base
-        # multiplica os dois (`atuais x ticket x 12`): com o denominador antigo isso dava a
-        # receita de agua da sub-bacia INTEIRA atribuida so a quem tem esgoto.
+        # por isso sai pelo UNIVERSO — o residencial quando a rodada mede so residencial,
+        # o total quando mede todas, exatamente como o `_ticket_der` la acima. O
+        # efeito-base multiplica os dois (`atuais x ticket x 12`): com o denominador
+        # antigo (as atuais) isso dava a receita de agua da sub-bacia INTEIRA atribuida
+        # so a quem tem esgoto.
         _lAt=num(_so.get("ligacoes_atuais"))
-        _lTot=num(_so.get("universo_ligacoes"))
+        _lTot=num(_so.get(_COB_LIG[0] if _usa_res(_sb) else "universo_ligacoes"))
         cen.sub_receita[_sb]={"atuais":_lAt,"ticket":((_rEsc/_lTot) if _lTot>1e-9 else 0.0),
                               "arrec":1.0,"base_receita":_BREC}
     if _orc_cal:                       # o cronograma de orcamento define a janela de CAPEX

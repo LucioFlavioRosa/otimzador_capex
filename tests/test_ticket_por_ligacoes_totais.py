@@ -24,7 +24,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _helpers import BANK_CTS, banco, engine, silent  # noqa: E402
+from _helpers import BANK_CLASSE, BANK_CTS, banco, engine, silent  # noqa: E402
 
 #: b1 na fixture: universo 1.000, atuais 400, faturada 200.000, arrecadada 180.000.
 B1_UNIVERSO, B1_ATUAIS = 1000, 400
@@ -83,3 +83,36 @@ def test_universo_zerado_nao_divide_por_zero():
             linha["universo_ligacoes"] = 0
     cen = silent(M.ler_banco, abas, usar_cts=False)
     assert cen.sub_receita["b1"]["ticket"] == 0.0
+
+
+# --------------------------------------------- o universo segue a regua da rodada
+#
+# Decisao do dono do produto em 28/09/2026, depois da correcao do denominador: o
+# universo do ticket tem de ser o MESMO universo que a rodada esta medindo. Com o
+# recorte residencial ligado, e o residencial; sem ele, o total.
+def _obra(cen, sub_bacia):
+    return next(o for o in cen.coletas if o.no == sub_bacia)
+
+
+@pytest.mark.parametrize("so_residencial,coluna", [(False, "universo_ligacoes"),
+                                                   (True, "universo_ligacoes_residencial")])
+def test_o_universo_do_ticket_e_o_que_a_rodada_mede(so_residencial, coluna):
+    M = engine()
+    abas = banco(BANK_CLASSE)
+    linha = next(r for r in abas["subbacia-operacional"] if r.get("sub_bacia") == "b1")
+    esperado = linha["receita_arrecadada_media_mensal"] / linha[coluna]
+    cen = silent(M.ler_banco, abas, unidade="u1", cobertura_so_residencial=so_residencial)
+    assert _obra(cen, "b1").ticket_mes == pytest.approx(esperado)
+    assert cen.sub_receita["b1"]["ticket"] == pytest.approx(esperado)
+
+
+def test_sem_a_coluna_residencial_a_sub_bacia_cai_para_o_universo_total():
+    """Mesma degradacao por sub-bacia que a cobertura ja faz: sem a coluna, aquela
+    linha mede no total — e o motor avisa, em vez de inventar o dado."""
+    M = engine()
+    abas = banco(BANK_CLASSE)
+    linha = next(r for r in abas["subbacia-operacional"] if r.get("sub_bacia") == "b1")
+    linha["universo_ligacoes_residencial"] = None
+    cen = silent(M.ler_banco, abas, unidade="u1", cobertura_so_residencial=True)
+    esperado = linha["receita_arrecadada_media_mensal"] / linha["universo_ligacoes"]
+    assert _obra(cen, "b1").ticket_mes == pytest.approx(esperado)
