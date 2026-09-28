@@ -226,6 +226,117 @@ def test_com_cts_vazia_e_coletor_por_perto_a_sub_bacia_vale_zero(capsys):
     assert on.sub_receita["b1"]["ticket"] == 0.0
 
 
+#: A RELACAO REAL da planilha (conferida em 19/09/2026 nas 337 sub-bacias pareadas):
+#: sem sufixo - com_cts = a CTS, coluna a coluna. b1 inteira 1000, cts1 500 -> 500;
+#: b4 inteira 1200, cts2 400 -> 800. Ligacoes atuais e receita seguem a mesma conta.
+COM_CTS_EXATA = {
+    "b1": {"universo_ligacoes_com_cts": 500, "ligacoes_atuais_com_cts": 200,
+           "universo_economias_com_cts": 550, "economias_atuais_com_cts": 220,
+           "receita_faturada_media_mensal_com_cts": 100000,
+           "receita_arrecadada_media_mensal_com_cts": 90000},
+    "b4": {"universo_ligacoes_com_cts": 800, "ligacoes_atuais_com_cts": 350,
+           "universo_economias_com_cts": 880, "economias_atuais_com_cts": 385,
+           "receita_faturada_media_mensal_com_cts": 80000,
+           "receita_arrecadada_media_mensal_com_cts": 72000},
+}
+
+
+def _sem_potencial(abas):
+    """Potencial 1,0 em todo mundo, para o universo efetivo ser o universo cru."""
+    for aba in ("subbacia-operacional", "cts-operacional"):
+        for linha in abas[aba]:
+            linha["potencial_crescimento"] = 1.0
+    return abas
+
+
+def test_a_area_do_coletor_e_contada_UMA_vez_o_universo_da_unidade_e_o_mesmo_nos_dois_modos():
+    """O invariante que o bug de 09/2026 violava. Com a relacao real (sem sufixo -
+    com_cts = CTS) e sem potencial de crescimento:
+
+        OFF  b1 1000 + b2 900 + b3 800 + b4 1200                     = 3900
+        ON   b1 500 + b2 900 + b3 800 + b4 800 + cts1 500 + cts2 400 = 3900
+
+    A area do coletor esta na CTS num cenario e na sub-bacia no outro — nunca nos dois,
+    nunca em nenhum."""
+    M = engine()
+    on = silent(M.ler_banco, _sem_potencial(_com_colunas(COM_CTS_EXATA)), usar_cts=True)
+    off = silent(M.ler_banco, _sem_potencial(_com_colunas(COM_CTS_EXATA)), usar_cts=False)
+    assert sum(on.max_lig.values()) == pytest.approx(3900.0)
+    assert sum(off.max_lig.values()) == pytest.approx(3900.0)
+    # O ticket da b1 e o da parte que sobrou para ela: 90.000 / 200 com o coletor. (Nao e
+    # invariante que ele iguale o de sem coletor — a fixture reparte a receita na
+    # proporcao das ligacoes, e por isso aqui coincide; na base real nao precisa.)
+    assert on.sub_receita["b1"]["ticket"] == pytest.approx(90000 / 200)
+
+
+def _com_cidade(abas):
+    """Poe `cidade_id` nas sub-bacias E nas CTS pela topologia (a fixture nao o traz nas
+    linhas operacionais; a carga real traz). cts1 fica na cidade de b1 e b2; cts2 na de
+    b3 e b4."""
+    sis_cid = {d["sistema_id"]: d["cidade_id"] for d in abas["cidade-sistema"]}
+    comp_sis = {d["componente_sistema_id"]: d["sistema_id"] for d in abas["sistema-topologia"]}
+    for aba, chave in (("subbacia-operacional", "sub_bacia"), ("cts-operacional", "cts")):
+        for linha in abas[aba]:
+            linha["cidade_id"] = sis_cid.get(comp_sis.get(linha[chave]))
+    return abas
+
+
+def test_com_os_pares_na_carga_a_cidade_NAO_zera_a_sub_bacia_sem_par(capsys):
+    """b2 divide a cidade com a cts1 mas nao esta pareada com ela. A carga traz os
+    pares (b1<->cts1, b4<->cts2): b2 vazia e coluna nao preenchida, e entra INTEIRA, com
+    aviso. Zera-la pelo vizinho apagaria 900 ligacoes que nada tem a ver com o coletor."""
+    abas = _com_colunas({**COM_CTS, "b2": {"universo_ligacoes_com_cts": None}})
+    abas = _com_cidade(abas)
+    M = engine()
+    on = M.ler_banco(abas, usar_cts=True)
+    saida = capsys.readouterr().out
+    assert on.max_lig[on.nos["b2"].cidade] == pytest.approx(2300.0)   # 800 (b1) + 900 (b2) + 600 (cts1)
+    assert "SEM CTS pareada" in saida and "b2" in saida
+
+
+def test_o_escopo_do_par_e_a_CIDADE_e_nao_o_banco_inteiro(capsys):
+    """Uma carga com par numa cidade e nenhum na outra (Rio pareado, Nilopolis so pela
+    cidade). Na cidade COM par, a vazia sem par entra inteira; na cidade SEM par nenhum,
+    a cidade decide e a vazia e zerada. Decidir pelo banco inteiro faria o par do Rio
+    desligar o sinal de Nilopolis."""
+    abas = _com_colunas({"b1": COM_CTS["b1"],
+                         "b2": {"universo_ligacoes_com_cts": None},
+                         "b4": {k: None for k in COM_CTS["b4"]}})
+    abas = _com_cidade(abas)
+    abas["subbacia-cts"] = [p for p in abas["subbacia-cts"] if p["cts"] == "cts1"]   # so c1 tem par
+    M = engine()
+    on = M.ler_banco(abas, usar_cts=True)
+    saida = capsys.readouterr().out
+    assert on.max_lig[on.nos["b2"].cidade] == pytest.approx(2300.0)   # 800 (b1) + 900 (b2 inteira) + 600 (cts1)
+    assert on.max_lig[on.nos["b4"].cidade] == pytest.approx(1400.0)   # 800 (b3) + 0 (b4 zerada) + 600 (cts2)
+    assert "SEM CTS pareada" in saida and "b2" in saida
+    assert "sinal: cidade" in saida and "b4" in saida
+
+
+def test_sem_par_nenhum_na_carga_a_cidade_decide(capsys):
+    """A planilha do Databricks nao traz o par: `subbacia-cts` chega vazia. Ai a cidade e
+    o unico sinal, e vale — b1 vazia na cidade da cts1 e "a CTS levou tudo"."""
+    abas = _com_colunas({"b1": {k: None for k in COM_CTS["b1"]}, "b4": COM_CTS["b4"]})
+    abas = _com_cidade(abas)
+    abas["subbacia-cts"] = []
+    M = engine()
+    on = M.ler_banco(abas, usar_cts=True)
+    saida = capsys.readouterr().out
+    assert on.max_lig[on.nos["b1"].cidade] == pytest.approx(1500.0)   # 0 (b1) + 900 (b2) + 600 (cts1)
+    assert "sinal: cidade" in saida
+
+
+def test_o_aviso_das_zeradas_diz_quantas_ligacoes_inteiras_elas_tinham(capsys):
+    """E o numero que denuncia um zero indevido: uma sub-bacia grande zerada por engano
+    aparece com o tamanho dela, em vez de sumir do plano em silencio."""
+    vazia = {"b1": {k: None for k in COM_CTS["b1"]}, "b4": COM_CTS["b4"]}
+    M = engine()
+    M.ler_banco(_com_colunas(vazia), usar_cts=True)
+    saida = capsys.readouterr().out
+    assert "1 sub-bacia(s)" in saida and "1,000 ligacoes inteiras" in saida
+    assert "('b1', 1000)" in saida and "sinal: par" in saida
+
+
 def test_com_cts_vazia_SEM_coletor_por_perto_fica_a_inteira():
     """b2 nao esta pareada e nao ha CTS na cidade dela (a fixture nao tem cidade nas
     CTS): a coluna vazia e so coluna nao preenchida, e vale a sem sufixo."""

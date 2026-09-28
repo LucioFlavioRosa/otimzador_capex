@@ -1026,28 +1026,57 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     # abaixo como universo - atuais das colunas que ficaram na linha. Com o coletor, a
     # sub-bacia encolheu e as novas encolhem junto; sem o teto que isso da, a area do
     # coletor seria "habilitada" duas vezes — pela obra da CTS e pela da sub-bacia.
-    _absorvidas=[]; _sem_consolidado=[]; _zeradas=[]      # so o modo LIGADO preenche
+    # `_zeradas` guarda, por sub-bacia, QUANTAS ligacoes inteiras ela tinha e QUAL sinal
+    # a zerou ("par" ou "cidade"): e o que o aviso la embaixo imprime, para um zero
+    # indevido aparecer como numero e nao sumir calado. `_vazias_soltas` sao as que
+    # vieram vazias SEM sinal nenhum e entraram inteiras.
+    _absorvidas=[]; _sem_consolidado=[]; _zeradas={}; _vazias_soltas=[]   # so o modo LIGADO preenche
     if usar_cts:                                   # LIGADO: CTS entra como no proprio, sub-bacia le `_com_cts`
         for _c,_row in _cts_op.items(): subop[_c]=_row
-        # `_com_cts` VAZIA numa sub-bacia que TEM coletor por perto — pareada em
-        # `subbacia-cts`, ou na cidade de alguma CTS — e "a CTS levou tudo", e vale ZERO:
-        # em Nilopolis sao 6 sub-bacias assim, cada uma do tamanho de uma CTS. Vazia numa
-        # sub-bacia sem CTS por perto e so a coluna nao preenchida: fica a sem sufixo, que
-        # e igual por construcao. A distincao importa porque a carga real nao traz o par
-        # sub-bacia<->CTS (`subbacia-cts` vem vazia), so a cidade.
+        # `_com_cts` VAZIA e "a CTS levou tudo" — a origem escreve `null`, e nao zero,
+        # quando o coletor cobre a sub-bacia inteira (Nilopolis: 6 de 8 sub-bacias; na
+        # planilha de 09/2026 sao 114 linhas assim, TODAS em cidade com CTS e nenhuma em
+        # cidade sem). Mas `null` tambem e o que uma coluna nao preenchida traz, e a
+        # diferenca decide se a sub-bacia vale zero ou inteira. Dois sinais, nesta ordem:
+        #
+        #   1. O PAR em `subbacia-cts`: preciso. Pareada e vazia -> a CTS levou tudo.
+        #   2. A CIDADE, so onde a carga NAO traz par nenhum: e o unico sinal que a
+        #      planilha do Databricks da (ela nao tem a coluna do par). Vazia na cidade de
+        #      uma CTS -> a CTS levou tudo.
+        #
+        # ONDE ha par, a cidade NAO decide: uma sub-bacia sem par que divide a cidade com
+        # um coletor pareado e vem vazia e coluna nao preenchida, e entra INTEIRA — com
+        # aviso. Zera-la pelo vizinho apagaria do plano uma sub-bacia que nada tem a ver
+        # com ele. Onde nao ha par nenhum, nao ha como distinguir, e vale a cidade.
+        #
+        # "ONDE" E POR CIDADE, e nao pelo banco inteiro. O motor recebe o schema inteiro
+        # (`carregar_postgres` faz `SELECT *`; a unidade so e recortada adiante), e uma
+        # carga pode trazer pares para umas cidades e nenhum para outras — Rio e Mesquita
+        # pareadas pela conferencia de 09/2026, Nilopolis so pela cidade. Decidir pelo
+        # banco inteiro faria a presenca de um par no Rio desligar o sinal de Nilopolis.
         _cid_com_cts={_r.get("cidade_id") for _r in _cts_op.values() if _r.get("cidade_id")}
+        _cid_com_pares=set()
+        for _sb,_c in _cts_dep.items():
+            if _c not in _cts_op: continue
+            for _cid in (_cts_op[_c].get("cidade_id"), (subop.get(_sb) or {}).get("cidade_id")):
+                if _cid: _cid_com_pares.add(_cid)
         for _sb,_s in subop.items():
             if _sb in _cts_op: continue
+            _pareada=(_sb in _cts_dep and _cts_dep[_sb] in _cts_op)
             if not any(_tot in _s for _exc,_tot in _CTS_CONSOLIDADO):
                 # BASE SEM AS COLUNAS (anterior a elas): nao ha o que ler, e o motor NAO
                 # inventa — fica a sub-bacia inteira. Pareada com CTS, isso conta a area
                 # do coletor duas vezes, e o ALERTA la embaixo diz exatamente isso.
-                if _sb in _cts_dep and _cts_dep[_sb] in _cts_op: _sem_consolidado.append(_sb)
+                if _pareada: _sem_consolidado.append(_sb)
                 continue
-            _perto=(_sb in _cts_dep and _cts_dep[_sb] in _cts_op) or (_s.get("cidade_id") in _cid_com_cts)
+            _cid=_s.get("cidade_id")
+            _pela_cidade=(_cid in _cid_com_cts) and (_cid not in _cid_com_pares)
+            _perto=_pareada or _pela_cidade
             _vazia=_s.get(_CTS_CONSOLIDADO[0][1]) in (None,"")
-            if _vazia and not _perto: continue
-            _mudou=False
+            if _vazia and not _perto:
+                _vazias_soltas.append(_sb)
+                continue
+            _mudou=False; _inteira=num(_s.get("universo_ligacoes"))
             for _exc,_tot in _CTS_CONSOLIDADO:
                 if _s.get(_tot) not in (None,""): _novo=num(_s.get(_tot))
                 elif _perto: _novo=0.0             # a CTS levou tudo: nada sobra, nem receita
@@ -1056,7 +1085,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                 _s[_exc]=_novo
             # Para o [info] e para a conferencia das novas: so quem de fato mudou de numero.
             # Longe de coletor as duas colunas sao iguais, e a troca nao e noticia.
-            if _vazia: _zeradas.append(_sb)
+            if _vazia: _zeradas[_sb]=(_inteira, "par" if _pareada else "cidade")
             elif _mudou: _absorvidas.append(_sb)
     # DESLIGADO: nada a trocar — a sub-bacia inteira e a coluna sem sufixo, que e a que
     # o resto da leitura ja usa. As obras da CTS ficam de fora la embaixo.
@@ -1559,14 +1588,27 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     # RECORTADOS PELA UNIDADE. `cen.nos` e o mesmo filtro que a linha acima usa — sem ele
     # o aviso falaria do banco inteiro, inclusive numa unidade sem CTS nenhuma.
     _abs_uni=[_sb for _sb in _absorvidas if _sb in cen.nos]
-    _zer_uni=[_sb for _sb in _zeradas if _sb in cen.nos]
+    _zer_uni={_sb:_v for _sb,_v in _zeradas.items() if _sb in cen.nos}
+    _sol_uni=[_sb for _sb in _vazias_soltas if _sb in cen.nos]
     _sem_uni=[_sb for _sb in _sem_consolidado if _sb in cen.nos]
     if _abs_uni:
         print(f"  [info] {len(_abs_uni)} sub-bacia(s) desta unidade leram as colunas *_com_cts (ligacoes, "
               f"economias e receita SEM a area do coletor). VAZAO e POPULACAO sao as da base da sub-bacia.")
     if _zer_uni:
-        print(f"  [aviso] {len(_zer_uni)} sub-bacia(s) desta unidade com `*_com_cts` VAZIA e CTS por perto: "
-              f"a CTS levou a area inteira, e elas entram com ZERO ligacoes e receita. Ex.: {_zer_uni[:3]}")
+        # O NUMERO E O QUE DENUNCIA UM ZERO INDEVIDO: "114 zeradas, 80.454 ligacoes inteiras"
+        # e o esperado na planilha de 09/2026; uma sub-bacia grande zerada por engano
+        # aparece na lista com o tamanho dela, em vez de sumir do plano em silencio.
+        _lig=sum(_v[0] for _v in _zer_uni.values())
+        _sinal="par" if all(_v[1]=="par" for _v in _zer_uni.values()) else \
+               "cidade (a carga nao traz o par)" if all(_v[1]=="cidade" for _v in _zer_uni.values()) else "par e cidade"
+        _maiores=sorted(_zer_uni.items(), key=lambda kv:-kv[1][0])[:5]
+        print(f"  [aviso] {len(_zer_uni)} sub-bacia(s) desta unidade com `*_com_cts` VAZIA e CTS por perto (sinal: {_sinal}): "
+              f"a CTS levou a area inteira, e elas entram com ZERO ligacoes e receita — {_lig:,.0f} ligacoes inteiras. "
+              f"Maiores: {[(s, int(v[0])) for s,v in _maiores]}")
+    if _sol_uni:
+        print(f"  [aviso] {len(_sol_uni)} sub-bacia(s) desta unidade com `*_com_cts` VAZIA e SEM CTS pareada: "
+              f"lidas como coluna nao preenchida, entraram INTEIRAS. Se alguma e area de coletor, "
+              f"falta o par em `subbacia-cts`. Ex.: {_sol_uni[:3]}")
     if _sem_uni:
         print(f"  [ALERTA] {len(_sem_uni)} sub-bacia(s) desta unidade com CTS pareada mas SEM as colunas "
               f"`*_com_cts`: com o coletor, a sub-bacia entrou INTEIRA — a area do coletor conta duas "

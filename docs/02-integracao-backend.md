@@ -111,9 +111,11 @@ São dez: `universo_ligacoes_com_cts`, `ligacoes_atuais_com_cts`, `universo_econ
 `receita_faturada_media_mensal_com_cts` / `receita_arrecadada_media_mensal_com_cts` — a receita
 entra na troca pela mesma razão: com o coletor, a da área dele está na linha da CTS.
 
-Regras de borda, com o coletor: `*_com_cts` vazia numa sub-bacia pareada (`subbacia_cts`) ou
-na cidade de alguma CTS vale **zero** (a CTS levou tudo — `[aviso]`); vazia sem CTS por perto
-é só coluna não preenchida e vale a sem sufixo. Base **sem** as colunas (anterior a elas): a
+Regras de borda, com o coletor: `*_com_cts` vazia é "a CTS levou tudo" (a origem escreve
+`null`, não zero) e vale **zero** — `[aviso]` com quantas ligações inteiras foram zeradas e
+qual sinal decidiu. O sinal é o **par** em `subbacia_cts`; onde a carga não traz par nenhum
+para a cidade (a planilha do Databricks não tem a coluna), é a **cidade** de alguma CTS. Numa
+cidade com pares, vazia sem par é só coluna não preenchida: entra inteira, com `[aviso]`. Base **sem** as colunas (anterior a elas): a
 sub-bacia entra inteira e o motor `[ALERTA]` que a área do coletor conta duas vezes. As
 ligações novas (`*_novas_obras`) são derivadas como universo − atuais das colunas lidas, então
 encolhem junto. Vazão e população não trocam.
