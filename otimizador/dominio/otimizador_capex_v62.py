@@ -1276,9 +1276,10 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         _rec_esc=_rec_fat if _BREC=="faturada" else _rec_arr
         _la_tot=num(so.get(_COB_LIG[0] if _usa_res(sb) else "universo_ligacoes"))
         _ticket_der=(_rec_esc/_la_tot) if _la_tot>1e-9 else 0.0
-        lig_novas=max(0.0,num(so.get("ligacoes_novas_obras")))   # ligacoes habilitadas pelas OBRAS -> RECEITA
-        # O que a obra conta para a META. Igual ao de cima sem recorte; com recorte, so as
-        # residenciais. A sub-bacia sem coluna residencial cai para o total.
+        # AS LIGACOES QUE AS OBRAS HABILITAM. `lig_novas` e o total da linha; `lig_cob` e
+        # o mesmo numero sem recorte e SO AS RESIDENCIAIS com ele (a sub-bacia sem a coluna
+        # cai para o total, e a cidade que mede em populacao fica de fora — `_usa_res`).
+        lig_novas=max(0.0,num(so.get("ligacoes_novas_obras")))
         lig_cob=max(0.0,num(so.get(_COB_LIG[2]))) if _usa_res(sb) else lig_novas
         for x in lst:                                  # UMA OBRA POR COMPONENTE (desacoplados)
             nome=str(x.get("componente","")); pe=num(x.get("tempo_execucao"))
@@ -1300,7 +1301,20 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                     obrigatoria=cal2py(x.get("obra_obrigatoria_ano"), _ab),
                     proibida_ate=cal2py(x.get("obra_proibida_ate"), _ab))
             if eh_lig:
-                kw.update(ligacoes=lig_novas,ligacoes_cobertura=lig_cob,ticket_mes=_ticket_der,
+                # RECEITA E META NA MESMA MOEDA — decisao do dono do produto em 28/09/2026.
+                #
+                # `ligacoes` (a receita) recebe `lig_cob`, e nao `lig_novas`: se a rodada
+                # mede so residencial, o ticket ja sai do universo RESIDENCIAL, e multiplicar
+                # um ticket residencial pelas ligacoes de TODAS as categorias inflava a
+                # receita — 12% na fixture de classes, so por marcar o recorte. Agora as duas
+                # pontas da conta usam a mesma populacao, e o mesmo `_usa_res` governa as
+                # duas.
+                #
+                # O QUE SE PERDE, declarado: as ligacoes novas NAO residenciais deixam de
+                # gerar receita, embora as mesmas obras as conectem e o CAPEX delas continue
+                # no plano. A receita fica SUBESTIMADA nessa parcela — escolha consciente,
+                # por ser o erro barato entre os dois.
+                kw.update(ligacoes=lig_cob,ligacoes_cobertura=lig_cob,ticket_mes=_ticket_der,
                           preco_ligacao=num(so.get("preco_por_ligacao")),arrec_dir=adir,arrec_ind=aind,lag=lag,maturacao=mat)
             _o=Obra(f"{code}_{sb}",tipo,**kw)
             _o.quantidade=_q; _o.preco_unitario=_pu

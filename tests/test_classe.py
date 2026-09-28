@@ -52,30 +52,28 @@ def test_vazao_NAO_muda():
     assert sum(off.vazao.values()) == pytest.approx(sum(on.vazao.values()))
 
 
-def test_o_ticket_segue_a_regua_da_rodada_e_por_isso_a_receita_muda():
-    """O UNIVERSO DO TICKET E O UNIVERSO QUE A RODADA MEDE — decisao do dono do
-    produto em 28/09/2026.
+def test_o_recorte_nao_infla_mais_a_receita():
+    """AS DUAS PONTAS DA CONTA NA MESMA MOEDA — decisao do dono do produto, 28/09/2026.
 
-    Este teste afirmava o contrario ("receita e VPL NAO mudam com o recorte"), e a
-    troca e deliberada: com o recorte ligado o ticket passa a sair do universo
-    RESIDENCIAL, e um denominador menor da um ticket maior. Na fixture, b1 tem 1.000
-    ligacoes e 800 residenciais, e o ticket vai de 180,00 para 225,00 (+25%).
+    Historico curto, porque este teste ja afirmou tres coisas diferentes:
 
-    O EFEITO NO TOTAL, MEDIDO: receita 71.972.375 -> 80.599.719 (+12%) e VPL
-    29.357.901 -> 33.593.435 (+14%).
+      1. "receita e VPL NAO mudam com o recorte" — valia quando o ticket saia do
+         universo TOTAL nos dois modos;
+      2. "a receita SOBE com o recorte" — quando o denominador do ticket passou a ser o
+         universo residencial e o multiplicador continuou total. Subia 12% nesta
+         fixture, so por marcar uma caixa de medicao;
+      3. o que ele afirma agora: com o multiplicador tambem residencial, a inflacao
+         acabou.
 
-    POR QUE SOBE, e nao desce: a receita da coluna e de TODAS as categorias, e as
-    ligacoes que o ticket multiplica (`ligacoes_novas_obras`) tambem sao todas —
-    so o denominador encolheu. Quem quiser a receita estavel entre os dois modos
-    tem de trocar tambem o multiplicador pela versao residencial
-    (`ligacoes_novas_obras_residencial`): medido, isso devolve 71.804.375, de novo
-    perto do modo sem recorte. E uma decisao de produto, e esta pendente.
-
-    O que NAO mudou: CAPEX e vazao seguem iguais entre os modos (os testes acima).
+    A receita fica LEVEMENTE ABAIXO da rodada sem recorte (0,2% aqui), e isso e a
+    parcela nao residencial das ligacoes novas, que deixou de gerar receita. E o preco
+    declarado da coerencia: as mesmas obras conectam essas ligacoes, e o CAPEX delas
+    continua no plano.
     """
     on = build_all(load_classe(False)); off = build_all(load_classe(True))
-    assert sum(off.get("receita_ano", [])) > sum(on.get("receita_ano", []))
-    assert off["vpl"] > on["vpl"]
+    r_on = sum(on.get("receita_ano", [])); r_off = sum(off.get("receita_ano", []))
+    assert r_off <= r_on, "o recorte nao pode AUMENTAR a receita — era o defeito de 28/09"
+    assert r_off > r_on * 0.95, "e nao pode derrubar: so a parcela nao residencial sai"
 
 
 # ---------------------------------------------------------------- cobertura por unidade
@@ -102,16 +100,23 @@ def test_cobertura_populacao_intacta():
     assert off.max_lig[c2] == pytest.approx(on.max_lig[c2])
 
 
-def test_a_obra_conta_menos_para_a_meta_e_o_mesmo_para_a_receita():
-    # As duas quantidades da obra, uma ao lado da outra: `lig` (receita) fica; `lig_cob`
-    # (meta) encolhe. Antes eram o mesmo campo, e era por isso que o recorte nao cabia.
+def test_com_recorte_a_receita_e_a_meta_contam_as_MESMAS_ligacoes():
+    """RECEITA E META NA MESMA MOEDA — decisao do dono do produto em 28/09/2026.
+
+    Este teste afirmava o contrario ("`lig` (receita) fica; `lig_cob` (meta) encolhe"),
+    e a troca e deliberada. Com o recorte ligado o ticket ja sai do universo
+    RESIDENCIAL; multiplica-lo pelas ligacoes de TODAS as categorias inflava a receita
+    em 12% nesta fixture, so por marcar o recorte.
+
+    Fica declarado o que se perde: as 120 ligacoes novas nao residenciais de b1
+    (600 - 480) deixam de gerar receita, embora as mesmas obras as conectem.
+    """
     off = load_classe(True)
     coletas = [o for o in off.coletas if o.no == "b1"]
     assert coletas, "a fixture precisa ter coleta em b1"
     o = coletas[0]
-    assert o.lig_cob < o.lig
-    assert o.lig == pytest.approx(600.0)      # 1000 - 400, total
-    assert o.lig_cob == pytest.approx(480.0)  # 800 - 320, residencial
+    assert o.lig == pytest.approx(480.0)      # 800 - 320, residencial
+    assert o.lig_cob == pytest.approx(480.0)  # a mesma populacao nas duas pontas
 
 
 def test_sem_recorte_as_duas_quantidades_sao_iguais():
