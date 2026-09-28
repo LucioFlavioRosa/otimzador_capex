@@ -1,0 +1,57 @@
+# Portão automático do motor. Nada aqui depende de segredo nem de infraestrutura
+# da Aegea: o job sobe do zero num runner público.
+#
+# POR QUE NÃO `requirements-prod.txt`: aquele arquivo é a receita do JOB em
+# produção, e traz o que o job precisa para FALAR com o mundo — `psycopg2`,
+# `sqlalchemy`, `azure-servicebus`, `pyarrow`. A suíte não fala com o mundo: ela
+# lê fixtures JSON e roda o motor em memória. Instalar o conjunto inteiro faria o
+# CI depender da compilação de pacotes que ele não exercita, e cada um deles seria
+# um jeito novo de o portão cair vermelho sem nada a ver com o motor.
+#
+# As quatro que entram, e o que cada uma segura:
+#   pytest      a suíte;
+#   pandas      `persistencia` monta as tabelas do resultado em DataFrame;
+#   matplotlib  `persistencia.set_engine` exige o dashboard, que o importa;
+#   ortools     o solver. Sem ele os testes marcados `solver` PULAM — e pular em
+#               silêncio num portão é o mesmo que não ter portão: são justamente
+#               os que comparam o ótimo com o golden.
+#
+# Os testes de Postgres continuam pulando, e é de propósito: eles pedem
+# `OTIMIZADOR_PG_TESTE` apontando para um banco de verdade, que um runner público
+# não tem. Quem mexer em `publicacao.py` roda a suíte com o banco na máquina.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          # 3.12: o que o Databricks Runtime serve hoje. Subir aqui antes de
+          # subir lá testaria um Python que a produção não roda.
+          python-version: '3.12'
+          cache: pip
+
+      - name: Dependências
+        run: pip install pytest pandas matplotlib ortools
+
+      # A suíte inteira, com o `-ra` do `pytest.ini` — o resumo no fim diz o que
+      # pulou e por quê, que é o que se lê quando o número de testes muda.
+      - name: Testes
+        run: python -m pytest
+
+      # O pacote PLANO que o executor local carrega (`projetos/pacote-motor-main`)
+      # é uma CÓPIA destes arquivos, e já divergiu em silêncio: em 28/09/2026 uma
+      # correção de receita ficou só no repositório, e a rodada local saiu com o
+      # número velho. O CI não alcança aquela pasta — ela não é versionada —, mas
+      # alcança o que a torna possível: um arquivo do motor que não compila
+      # sozinho, fora do pacote, quebra a cópia na hora de sincronizar.
+      - name: Cada módulo compila isolado
+        run: python -m compileall -q otimizador
