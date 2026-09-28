@@ -158,3 +158,30 @@ def test_faseada_a_trava_conta_CAPACIDADE_e_nao_cabecas():
     s1 = _ete(cen).sistema
     coletas = [o for o in cen.coletas if cen.nos[o.no].sistema == s1]
     assert coletas and all(res["elig"].get(o.id) for o in coletas)
+
+
+# ------------------------------------------------ o relatorio do sistema
+def test_o_relatorio_conta_modulos_FISICOS_e_nao_obras(tmp_path):
+    """`otim_sistema.modulos_construidos` e `capacidade_instalada` alimentam a tela —
+    o backend soma `modulos_construidos x capacidade_modulo` para mostrar a capacidade
+    da unidade.
+
+    O pacote da ETE nova e UMA obra que vale `modulos` modulos. Contando obras, um
+    pacote de 3 apareceria como "1 modulo construido" e a capacidade sairia 3x menor.
+    Antes desta mudanca isso nao aparecia porque a ETE nova tinha UMA obra so e o
+    `cap_modulo` dela era o total do pacote; ao ganhar expansao, os modulos deixaram de
+    ser todos iguais e a conta por cabeca passou a mentir.
+    """
+    pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.infraestrutura import persistencia as P
+    M = engine()
+    D.set_engine(M); P.set_engine(M, D)
+    cen = _cen(_abas(modulos=3), ete_faseada=True)
+    tabs = silent(P.materializar, cen, build_all(cen), run_id="run_ete", banco="pg")
+    linha = tabs["run_sistema"].set_index("sistema").loc[_ete(cen).sistema]
+    assert linha["modulos_construidos"] == 3, "o pacote de 3 vale 3 modulos, nao 1 obra"
+    assert linha["capacidade_instalada"] == pytest.approx(3 * CAP_MOD)
+    # e a conta que o backend faz para a tela fecha com a capacidade instalada
+    assert linha["modulos_construidos"] * linha["capacidade_modulo"] == pytest.approx(
+        linha["capacidade_instalada"] - linha["folga_inicial"])

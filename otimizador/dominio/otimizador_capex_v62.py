@@ -1421,7 +1421,11 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                 mo=Obra(f"{eo.id}#nova","ete_mod",sistema=sisn,capex_comp={f"ETE nova ({eo.modulos} mod + terreno)":capex_total},
                         opex_ano=eo.modulos*eo.opex_por_modulo,prazo_inicio=eo.prazo_inicio,prazo_exec=eo.prazo,
                         obrigatoria=getattr(eo,"obrig",0),proibida_ate=eo.proibida_ate,wacc=eo.wacc)   # ETE obrigatoria -> o pacote e obrigatorio
+                # `n_modulos` e quantos modulos FISICOS a obra representa. O pacote vale
+                # `modulos`; cada expansao vale 1. Quem conta modulos para relatorio soma
+                # isto, e nao o numero de OBRAS — senao um pacote de 3 vira '1 modulo'.
                 mo.cap_modulo=cap_pacote; mo.folga=0.0; mo.modidx=0; mo.e_pacote=True
+                mo.n_modulos=eo.modulos
                 lst=[mo]; obras.append(mo)
                 # A EXPANSAO. `depende_do_pacote` existe porque sem ela o otimizador
                 # compraria um modulo barato ANTES do pacote caro para liberar vazao mais
@@ -1433,6 +1437,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                             opex_ano=eo.opex_por_modulo,prazo_inicio=eo.prazo_inicio,prazo_exec=eo.prazo,
                             obrigatoria=0,proibida_ate=eo.proibida_ate,wacc=eo.wacc)   # expansao nunca e obrigatoria
                     mx.cap_modulo=eo.cap_modulo; mx.folga=0.0; mx.modidx=k; mx.depende_do_pacote=True
+                    mx.n_modulos=1
                     lst.append(mx); obras.append(mx)
             else:                                        # EXPANSAO: ramp de modulos conforme a vazao excede a folga
                 exc=max(0.0,_sf.get(sisn,0.0)-eo.folga)
@@ -1442,7 +1447,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                             opex_ano=eo.opex_por_modulo,prazo_inicio=eo.prazo_inicio,prazo_exec=eo.prazo,
                             obrigatoria=(getattr(eo,"obrig",0) if k==1 else 0),   # ETE obrigatoria -> 1o modulo obrigatorio; demais por demanda
                             proibida_ate=eo.proibida_ate,wacc=eo.wacc)
-                    mo.cap_modulo=eo.cap_modulo; mo.folga=eo.folga; mo.modidx=k
+                    mo.cap_modulo=eo.cap_modulo; mo.folga=eo.folga; mo.modidx=k; mo.n_modulos=1
                     lst.append(mo); obras.append(mo)
             modulos_sis[sisn]=lst
     _set_forma_adocao(curva_adocao)

@@ -526,7 +526,12 @@ def _tabela_sistema(cen, res, rid):
         vaz_tot = sum(cen.vazao.get(sb, 0.0) for sb in subs)
         folga = float(getattr(e, "folga", 0.0) or 0.0) if e else 0.0
         capmod = float(getattr(e, "cap_modulo", 0.0) or 0.0) if e else 0.0
-        cap_inst = folga + len(constr) * capmod
+        # MODULOS FISICOS, e nao numero de OBRAS: o pacote de uma ETE nova e UMA obra que
+        # vale `modulos` modulos. Contar obras faria um pacote de 3 aparecer como "1
+        # modulo construido", e `capacidade_instalada` (e o `modulos_construidos x
+        # capacidade_modulo` que o backend soma para a tela) sairia 3x menor.
+        _nm = lambda ms: sum(int(getattr(m, "n_modulos", 1) or 0) for m in ms)
+        cap_inst = folga + _nm(constr) * capmod
         lin.append({
             "run_id": rid, "sistema": sis, "cidade": cid,
             "horizonte_anos": int(cen.hz.get(sis, cen.anos)),
@@ -543,7 +548,7 @@ def _tabela_sistema(cen, res, rid):
             "unidade_capacidade": (getattr(e, "unidade_capacidade", None) if e else None),
             "capex_modulo": float(getattr(e, "capex_modulo", 0.0) or 0.0) if e else None,
             "capex_terreno": float(getattr(e, "capex_terreno", 0.0) or 0.0) if e else None,
-            "modulos_disponiveis": len(mods), "modulos_construidos": len(constr),
+            "modulos_disponiveis": _nm(mods), "modulos_construidos": _nm(constr),
             "capex_modulos_construidos": sum(m.capex for m in constr),
             "capacidade_instalada": cap_inst,
             "vazao_conectada": vaz_con, "vazao_total_sistema": vaz_tot,
