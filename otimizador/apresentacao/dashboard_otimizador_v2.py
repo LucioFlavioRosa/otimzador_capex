@@ -75,11 +75,6 @@ def _brl(v, casas=0):
     return f"R$ {v:,.{casas}f}".replace(",", "@").replace(".", ",").replace("@", ".")
 
 
-def _mm(v):
-    """R$ em milhoes, compacto."""
-    return f"{v/1e6:,.1f}".replace(",", "@").replace(".", ",").replace("@", ".")
-
-
 def capex_unitario(o):
     """'2.472,6 m x R$ 449,99/m' — vazio se o banco nao trouxe os unitarios."""
     q = getattr(o, "quantidade", None); pu = getattr(o, "preco_unitario", None)

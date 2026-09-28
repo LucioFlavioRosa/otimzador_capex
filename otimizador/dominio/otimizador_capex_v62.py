@@ -1247,12 +1247,35 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         mat=int(num(so.get("tempo_ramp_up"),2))
         # SEM inadimplencia: a escolha faturada/arrecadada ja embute a arrecadacao
         adir=1.0; aind=1.0
-        # ticket derivado = receita mensal media (faturada|arrecadada) / ligacoes atuais
+        # TICKET DERIVADO = receita mensal media (faturada|arrecadada) / ligacoes TOTAIS
+        # (`universo_ligacoes`, o QTD_LIGACOES_TOTAL da origem), e NAO `ligacoes_atuais`.
+        #
+        # As duas pontas da divisao tem de ter o MESMO escopo. A receita e a arrecadacao
+        # de AGUA da sub-bacia inteira — de todas as ligacoes que faturam agua —, enquanto
+        # `ligacoes_atuais` e a base JA ATENDIDA com esgoto (o numerador da cobertura, ver
+        # `baselig` mais abaixo). Dividir a receita de todos pelo subconjunto atendido
+        # inflava o ticket por 1/cobertura: na base real de 09/2026 isso era 2,1x no
+        # agregado das sub-bacias com obras, e passava de 100x onde a cobertura e minima
+        # (centro_bl1: R$ 1.086/mes de conta media de agua, que nao existe).
+        #
+        # O ticket e o da AGUA: a tarifa de esgoto e ele x fator de paridade (ver
+        # `_fator_esgoto`). Por isso o denominador e a base que FATURA AGUA, e nao a que
+        # ja tem esgoto.
+        #
+        # O DENOMINADOR SEGUE A REGUA DA RODADA: com o recorte residencial ligado e a
+        # sub-bacia tendo a coluna, o universo e o RESIDENCIAL — a mesma escolha que
+        # `lig_cob` faz logo abaixo para a meta. Sem recorte, o universo total.
+        # Decisao do dono do produto (28/09/2026): o universo do ticket tem de ser o
+        # mesmo universo que a rodada esta medindo.
+        #
+        # `_com_cts` ja esta resolvida nas duas versoes: o bloco de consolidacao acima
+        # sobrescreve `universo_ligacoes`, `universo_ligacoes_residencial` e as duas
+        # receitas na propria linha quando a rodada tem CTS.
         _rec_fat=num(so.get("receita_faturada_media_mensal"))
         _rec_arr=num(so.get("receita_arrecadada_media_mensal"))
         _rec_esc=_rec_fat if _BREC=="faturada" else _rec_arr
-        _la_atu=num(so.get("ligacoes_atuais"))
-        _ticket_der=(_rec_esc/_la_atu) if _la_atu>1e-9 else 0.0
+        _la_tot=num(so.get(_COB_LIG[0] if _usa_res(sb) else "universo_ligacoes"))
+        _ticket_der=(_rec_esc/_la_tot) if _la_tot>1e-9 else 0.0
         lig_novas=max(0.0,num(so.get("ligacoes_novas_obras")))   # ligacoes habilitadas pelas OBRAS -> RECEITA
         # O que a obra conta para a META. Igual ao de cima sem recorte; com recorte, so as
         # residenciais. A sub-bacia sem coluna residencial cai para o total.
@@ -1361,8 +1384,15 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         _so=subop.get(_sb,{})
         _rEsc=(num(_so.get("receita_faturada_media_mensal")) if _BREC=="faturada"
                else num(_so.get("receita_arrecadada_media_mensal")))
+        # `atuais` e a base JA ATENDIDA (quem paga esgoto hoje); `ticket` e o da AGUA, e
+        # por isso sai pelo UNIVERSO — o residencial quando a rodada mede so residencial,
+        # o total quando mede todas, exatamente como o `_ticket_der` la acima. O
+        # efeito-base multiplica os dois (`atuais x ticket x 12`): com o denominador
+        # antigo (as atuais) isso dava a receita de agua da sub-bacia INTEIRA atribuida
+        # so a quem tem esgoto.
         _lAt=num(_so.get("ligacoes_atuais"))
-        cen.sub_receita[_sb]={"atuais":_lAt,"ticket":((_rEsc/_lAt) if _lAt>1e-9 else 0.0),
+        _lTot=num(_so.get(_COB_LIG[0] if _usa_res(_sb) else "universo_ligacoes"))
+        cen.sub_receita[_sb]={"atuais":_lAt,"ticket":((_rEsc/_lTot) if _lTot>1e-9 else 0.0),
                               "arrec":1.0,"base_receita":_BREC}
     if _orc_cal:                       # o cronograma de orcamento define a janela de CAPEX
         _abref=min(_anobase.values()) if _anobase else 2026

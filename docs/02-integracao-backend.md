@@ -133,8 +133,10 @@ Duas consequências que valem estar escritas:
   coletor, falta o esgoto que vinha por ele.
 - **A receita da linha da CTS nunca é somada à sub-bacia.** O que muda com a escolha é qual
   receita da própria sub-bacia entra: com o coletor, a `_com_cts`; sem ele, a sem sufixo. O
-  ticket sai de `receita ÷ ligações atuais` **das mesmas colunas** — as duas trocam juntas, e a
-  divisão nunca mistura uma versão com a outra.
+  ticket sai de `receita ÷ ligações TOTAIS` (`universo_ligacoes`) **das mesmas colunas** — as
+  duas trocam juntas, e a divisão nunca mistura uma versão com a outra. O denominador é o
+  universo, e não as `ligações atuais`, porque a receita é a de água de toda a sub-bacia
+  enquanto as atuais são só a base já atendida com esgoto (corrigido em 28/09/2026).
 
 **População não tem versão residencial**: indústria não mora, então `universo_populacao` já é
 residencial. Cidade que mede a meta em população ignora as quatro colunas acima.
