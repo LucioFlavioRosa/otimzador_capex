@@ -1677,7 +1677,14 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
             tot=sum(cen.vazao.get(sb,0.0) for sb in sbmap.get(e.sistema,[]))
             _opm=getattr(e,"opex_por_modulo",e.opex_ano)
             if getattr(e,"nova",False):
-                e.capex_fixo=e.capex_terreno+e.modulos*e.capex_modulo; e.opex_ano=e.modulos*_opm
+                # A EXPANSAO TAMBEM VALE AQUI (28/09/2026). O modo fixo pre-dimensiona para a
+                # vazao TOTAL do sistema; deixar a ETE nova no pacote do cadastro faria este
+                # modo subestimar CAPEX e OPEX sempre que a vazao passasse do projeto — que e
+                # exatamente o caso que a mudanca veio tratar.
+                _exc=max(0.0,tot-e.modulos*e.cap_modulo)
+                _ex=int(math.ceil(_exc/e.cap_modulo)) if (_exc>1e-9 and e.cap_modulo>0) else (1 if _exc>1e-9 else 0)
+                _n=e.modulos+_ex
+                e.capex_fixo=e.capex_terreno+_n*e.capex_modulo; e.opex_ano=_n*_opm
             else:
                 exc=max(0.0,tot-e.folga)
                 nn=int(math.ceil(exc/e.cap_modulo)) if (exc>1e-9 and e.cap_modulo>0) else (1 if exc>1e-9 else 0)

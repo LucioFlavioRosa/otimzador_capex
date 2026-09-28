@@ -82,13 +82,19 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
         o=cen.obras[oid]; return sum(compY(o,t)*x[oid][t] for t in perm[oid])
 
     # ---- ETE: modulos (expansao) ----
+    # A ETE NOVA TAMBEM TEM VARIAVEL DE MODULOS (28/09/2026). Ela era tratada como pacote
+    # de tamanho fixo, com um teto duro de vazao; agora expande por demanda como a que ja
+    # existe, e a unica diferenca e o PISO: se a ETE e construida, ela nasce com pelo menos
+    # os `modulos` do cadastro — o pacote projetado, indivisivel.
     nmod={};zmod={}
     for e in etes:
-        if EF or getattr(e,"nova",False): continue
+        if EF: continue
         cap=e.cap_modulo or 1e-9
-        Nmax=int(math.ceil(sum(cen.vazao.get(sb,0.0) for sb in sis_sb.get(e.sistema,[]))/cap))+1
+        _piso=int(getattr(e,"modulos",0) or 0) if getattr(e,"nova",False) else 0
+        Nmax=max(_piso,int(math.ceil(sum(cen.vazao.get(sb,0.0) for sb in sis_sb.get(e.sistema,[]))/cap)))+1
         nmod[e.id]=md.NewIntVar(0,Nmax,f"nmod_{e.id}")
         md.Add(nmod[e.id]<=Nmax*built[e.id]); md.Add(nmod[e.id]>=built[e.id])
+        if _piso: md.Add(nmod[e.id]>=_piso*built[e.id])
         zmod[e.id]={}
         for t in perm[e.id]:
             z=md.NewIntVar(0,Nmax,f"z_{e.id}_{t}")
@@ -109,11 +115,13 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
     # ---- capacidade da ETE (so no modo modular) ----
     for e in ([] if EF else etes):
         dem=sum(int(round(cen.vazao.get(sb,0.0)*VZ))*conect[sb] for sb in sis_sb.get(e.sistema,[]))
+        # MESMA RESTRICAO PARA AS DUAS: a capacidade construida cobre a demanda conectada.
+        # Era `dem <= modulos*cap` na ETE nova — teto duro que o solver nao podia comprar,
+        # e por isso ele simplesmente deixava sub-bacias fora do plano.
+        md.Add(nmod[e.id]*int(round(e.cap_modulo*VZ)) >= dem - int(round(e.folga*VZ)))
         if getattr(e,"nova",False):
-            md.Add(dem<=int(round(e.modulos*e.cap_modulo*VZ)))
+            # greenfield: sem estacao nao ha para onde mandar, nem com folga
             for sb in sis_sb.get(e.sistema,[]): md.Add(built[e.id]>=conect[sb])
-        else:
-            md.Add(nmod[e.id]*int(round(e.cap_modulo*VZ)) >= dem - int(round(e.folga*VZ)))
 
     # ---- receita (u[c,k]) ----
     coletas=[c for c in cen.coletas if c.necessaria]; u={}
@@ -179,14 +187,25 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
                         elif t//12==Y: val=tot
                         if val>0: vs.append(x[e.id][t]); cs.append(R(val))
                 elif getattr(e,"nova",False):
-                    tot=e.capex_terreno+e.modulos*e.capex_modulo; cm=tot/pe if pe>0 else 0
+                    # DUAS PARCELAS: o TERRENO e do pacote e se paga uma vez (segue `x`); os
+                    # MODULOS seguem `zmod`, que e quantos o solver escolheu — o pacote e o
+                    # piso dele. Antes o CAPEX era o pacote fixo, e a expansao nao existia.
+                    ter=e.capex_terreno; cmt=ter/pe if pe>0 else 0
+                    for t in perm[e.id]:
+                        val=0.0
+                        if pe>0:
+                            for m in range(t,t+pe):
+                                if m//12==Y: val+=cmt
+                        elif t//12==Y: val=ter
+                        if val>0: vs.append(x[e.id][t]); cs.append(R(val))
+                    cm=e.capex_modulo/pe if pe>0 else 0
                     for t in perm[e.id]:
                         val=0.0
                         if pe>0:
                             for m in range(t,t+pe):
                                 if m//12==Y: val+=cm
-                        elif t//12==Y: val=tot
-                        if val>0: vs.append(x[e.id][t]); cs.append(R(val))
+                        elif t//12==Y: val=e.capex_modulo
+                        if val>0: vs.append(zmod[e.id][t]); cs.append(R(val))
                 else:
                     cm=e.capex_modulo/pe if pe>0 else 0
                     for t in perm[e.id]:
@@ -209,8 +228,10 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
         if EF:
             for t in perm[e.id]: addterm(x[e.id][t],-R(pv_lump(e,e.capex_fixo,t)))
         elif getattr(e,"nova",False):
-            tot=e.capex_terreno+e.modulos*e.capex_modulo
-            for t in perm[e.id]: addterm(x[e.id][t],-R(pv_lump(e,tot,t)))
+            # terreno (uma vez, com a obra) + modulos (quantos o solver comprar)
+            for t in perm[e.id]:
+                addterm(x[e.id][t],-R(pv_lump(e,e.capex_terreno,t)))
+                addterm(zmod[e.id][t],-R(modulo_pv(e,t)))
         else:
             for t in perm[e.id]: addterm(zmod[e.id][t],-R(modulo_pv(e,t)))
     for c in coletas:

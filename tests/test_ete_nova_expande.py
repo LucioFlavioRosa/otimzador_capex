@@ -185,3 +185,41 @@ def test_o_relatorio_conta_modulos_FISICOS_e_nao_obras(tmp_path):
     # e a conta que o backend faz para a tela fecha com a capacidade instalada
     assert linha["modulos_construidos"] * linha["capacidade_modulo"] == pytest.approx(
         linha["capacidade_instalada"] - linha["folga_inicial"])
+
+
+# ------------------------------------------------ os outros dois caminhos da mesma regra
+#
+# Achados pela revisao do Codex em 28/09/2026: a primeira versao da mudanca tratou so
+# `_dimensiona_etes` e `viavel()`, e deixou de fora o SOLVER e o modo `ete_fixo` — os
+# dois com a regra antiga, cada um do seu jeito.
+def test_o_solver_constroi_modulo_a_mais_em_vez_de_deixar_sub_bacia_de_fora():
+    """O CP-SAT tinha a PROPRIA trava: `dem <= modulos x cap_modulo`. Era restricao que o
+    solver nao podia comprar, entao ele simplesmente deixava sub-bacias fora do plano —
+    e o plano saia "otimo" com menos receita, sem nada dizendo o porque.
+
+    Com pacote de 1 modulo (150) e 180 de vazao em s1, as DUAS sub-bacias tem de entrar.
+    """
+    from _helpers import ORC_SLACK, solver_or_skip
+    CP = solver_or_skip()
+    M = engine()
+    cen = _cen(_abas(modulos=1), orcamento=ORC_SLACK)
+    res = silent(CP.resolver_cpsat, cen, max_time_s=30, workers=4)
+    sis = _ete(cen).sistema
+    coletas = [o for o in cen.coletas if cen.nos[o.no].sistema == sis]
+    assert coletas
+    construidas = [o for o in coletas if res["plano"].get(o.id) is not None]
+    assert len(construidas) == len(coletas), (
+        "o solver deixou sub-bacia de fora por capacidade, em vez de comprar modulo")
+    silent(M.viavel, cen, res["plano"])
+    assert _ete(cen).n_mod == 2
+
+
+def test_modo_ete_fixo_tambem_dimensiona_a_expansao():
+    """`ete_fixo` pre-dimensiona para a vazao TOTAL do sistema. Com a ETE nova presa ao
+    pacote do cadastro, ele subestimava CAPEX e OPEX — 800.000 no lugar de 1.300.000 na
+    fixture."""
+    M = engine()
+    cen = _cen(_abas(modulos=1), ete_fixo=True)
+    e = _ete(cen)
+    esperado = TERRENO + 2 * CAPEX_MOD
+    assert e.capex_fixo == pytest.approx(esperado)
