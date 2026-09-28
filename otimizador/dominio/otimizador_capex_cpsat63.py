@@ -78,6 +78,26 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
     for oid in build:
         b=md.NewBoolVar(f"b_{oid}"); md.Add(sum(x[oid].values())==b); built[oid]=b
         if cen.obras[oid].obrigatoria: md.Add(b==1)
+    # ---- PRECEDENCIA: a expansao da ETE nova so COMECA com o pacote PRONTO ----
+    #
+    # Nao existe precedencia entre obras neste motor — `inicio_min` e um piso estatico, e
+    # nada impedia o solver de agendar um modulo de expansao antes (ou junto) da estacao
+    # que ele expande. Decisao do dono do produto em 28/09/2026: a expansao so pode
+    # comecar depois do pacote concluido.
+    #
+    # So existe no modo FASEADO, onde os modulos sao obras proprias. No modo modular a ETE
+    # inteira e UMA obra com `nmod` modulos, entao nao ha o que ordenar.
+    for oid in aeg:
+        o=cen.obras[oid]
+        if not getattr(o,"depende_do_pacote",False): continue
+        pid=str(oid).split("#")[0]+"#nova"
+        if pid not in x: continue
+        pe_pac=cen.obras[pid].prazo
+        for t in perm[oid]:
+            antes=[x[pid][s] for s in perm[pid] if s+pe_pac<=t]
+            if antes: md.Add(x[oid][t]<=sum(antes))
+            else:     md.Add(x[oid][t]==0)     # nao ha quando o pacote caiba antes de `t`
+
     def compYexpr(oid): 
         o=cen.obras[oid]; return sum(compY(o,t)*x[oid][t] for t in perm[oid])
 

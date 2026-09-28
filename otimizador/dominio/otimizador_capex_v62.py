@@ -741,6 +741,20 @@ def viavel(cen,plano):
     # `modulos` em branco o teto era zero, o que excluia o sistema de qualquer plano sem
     # dizer nada. Agora a demanda acima do pacote vira modulo de expansao, como na ETE
     # existente: vira CUSTO no plano, que o otimizador pesa, e nao um plano impossivel.
+    # A EXPANSAO DA ETE NOVA SO COMECA COM O PACOTE PRONTO (28/09/2026). Nao ha
+    # precedencia entre obras neste motor — `inicio_min` e piso estatico —, entao a regra
+    # entra aqui, como as outras que dizem o que um plano NAO pode ser.
+    for oid,y in plano.items():
+        o=cen.obras.get(oid)
+        if y is None or o is None or not getattr(o,"depende_do_pacote",False): continue
+        pac=cen.obras.get(str(oid).split("#")[0]+"#nova")
+        if pac is None: continue
+        yp=plano.get(pac.id)
+        if yp is None:
+            return False,f"{oid}: expansao sem o pacote da ETE nova construido"
+        if y<yp+pac.prazo:
+            return False,(f"{oid}: expansao comeca no mes {y}, antes de a ETE nova ficar "
+                          f"pronta (mes {yp+pac.prazo})")
     anos=cen.anos;capex={reg:[0.0]*anos for reg in cen.regionais}
     for oid,y in plano.items():
         o=cen.obras[oid]

@@ -223,3 +223,70 @@ def test_modo_ete_fixo_tambem_dimensiona_a_expansao():
     e = _ete(cen)
     esperado = TERRENO + 2 * CAPEX_MOD
     assert e.capex_fixo == pytest.approx(esperado)
+
+
+# ------------------------------------------------ precedencia: pacote antes da expansao
+#
+# Decisao do dono do produto em 28/09/2026: a expansao so pode COMECAR depois do pacote
+# concluido. Nao havia precedencia entre obras neste motor — `inicio_min` e um piso
+# estatico —, entao a regra entrou em `viavel()` e, no solver, como restricao.
+def _plano_faseado(cen, mes_pacote, mes_expansao):
+    """Plano com tudo no `inicio_min`, menos o pacote e a expansao, que vao nos meses
+    pedidos. Devolve tambem o par (id_pacote, id_expansao)."""
+    mods = cen.modulos_sis[_ete(cen).sistema]
+    pac = next(m for m in mods if getattr(m, "e_pacote", False))
+    exp = next(m for m in mods if getattr(m, "depende_do_pacote", False))
+    plano = _plano_tudo(cen)
+    plano[pac.id] = mes_pacote
+    plano[exp.id] = mes_expansao
+    return plano, pac, exp
+
+
+def test_a_expansao_nao_pode_comecar_antes_do_pacote_ficar_pronto():
+    M = engine()
+    cen = _cen(_abas(modulos=1), ete_faseada=True)
+    plano, pac, _exp = _plano_faseado(cen, mes_pacote=0, mes_expansao=0)
+    ok, motivo = silent(M.viavel, cen, plano)
+    assert not ok, "comecar junto com o pacote e expandir uma estacao que nao existe"
+    assert "antes de a ETE nova ficar pronta" in motivo, motivo
+    # um mes antes do pacote concluir tambem nao vale
+    plano, pac, _exp = _plano_faseado(cen, 0, pac.prazo - 1)
+    assert not silent(M.viavel, cen, plano)[0]
+
+
+def test_a_expansao_vale_a_partir_do_mes_em_que_o_pacote_fica_pronto():
+    M = engine()
+    cen = _cen(_abas(modulos=1), ete_faseada=True)
+    plano, pac, _exp = _plano_faseado(cen, 0, 0)
+    plano[_exp.id] = pac.prazo                       # exatamente quando o pacote conclui
+    ok, motivo = silent(M.viavel, cen, plano)
+    assert ok, motivo
+
+
+def test_expansao_sem_pacote_construido_nao_e_plano():
+    M = engine()
+    cen = _cen(_abas(modulos=1), ete_faseada=True)
+    plano, pac, exp = _plano_faseado(cen, 0, 24)
+    plano[pac.id] = None
+    ok, motivo = silent(M.viavel, cen, plano)
+    assert not ok and "sem o pacote" in motivo, motivo
+
+
+def test_o_solver_respeita_a_precedencia():
+    """Pelo `resolver_por_sistema`, que e o caminho de producao.
+
+    NAO pelo `resolver_cpsat` direto: ele JA QUEBRAVA no modo faseado antes desta
+    mudanca (conferido no `origin/main`), com
+    `TypeError: can only concatenate str (not "NoneType") to str` em
+    `otimizador_capex_cpsat63.py:261` — o laco de OPEX pula `tipo=="ete"` mas nao
+    `"ete_mod"`, e obra-modulo nao tem `no`. Defeito anterior e de outro escopo:
+    consertar exige decidir como o OPEX dos modulos entra no objetivo do solver, e
+    nao so calar o erro.
+    """
+    from _helpers import ORC_SLACK, solver_or_skip
+    CP = solver_or_skip()
+    M = engine()
+    cen = _cen(_abas(modulos=1), ete_faseada=True, orcamento=ORC_SLACK)
+    res = silent(CP.resolver_por_sistema, cen, max_time_s=30, workers=4)
+    ok, motivo = silent(M.viavel, cen, res["plano"])
+    assert ok, f"o solver devolveu plano que a regra recusa: {motivo}"
