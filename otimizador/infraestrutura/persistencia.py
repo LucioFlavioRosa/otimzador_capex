@@ -176,6 +176,27 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
     dec = M.vpl_por_subbacia(cen, res)
     fat = res.get("fator_esgoto_ano", {}) or {}
     aud = res.get("auditoria_orcamento", {}) or {}
+    # A RECEITA DO PLANO TEM DUAS PARCELAS, e as duas somam no total.
+    #
+    #   `receita_ano`      as ligacoes NOVAS que as obras habilitam;
+    #   `efeito_base_ano`  o EFEITO-BASE: a base JA ATENDIDA passa a pagar a nova
+    #                      equivalencia quando a cobertura da cidade sobe de faixa.
+    #
+    # As duas series nascem aqui, antes do `run_meta`, porque `run_meta.receita_total` e
+    # `run_ano.receita_total` TEM DE SER O MESMO NUMERO. Ate 28/09/2026 o total do
+    # `run_meta` somava so a primeira parcela, e o resultado era uma rodada em que o KPI
+    # de Receita ficava 10,8% abaixo da soma da propria serie anual que a tela desenha
+    # (R$ 245,5 milhoes numa rodada de 24 anos) — e o EBITDA total herdava a mesma
+    # diferenca, porque sai de `receita_total - opex_total`.
+    #
+    # O efeito-base usa a serie do engine (v51+) quando ela existe; senao a persistencia
+    # calcula do cenario, para nao depender da versao do engine.
+    #
+    # QUEM PRECISA DAS PARCELAS SEPARADAS le `run_ano`, que traz as duas em coluna
+    # propria (`receita` e `receita_efeito_base`). Nao ha coluna nova no `run_meta`: ela
+    # obrigaria migracao de schema para repetir um corte que a serie anual ja da.
+    rec_nov_ano = res.get("receita_ano") or [0.0] * anos
+    efeito_base_ano = res.get("efeito_base_ano") or _efeito_base_ano_cen(cen, res, anos)
     T = {}
 
     # ---------------------------------------------------------------- run_meta
@@ -208,7 +229,9 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
         "vp_efeito_base": res.get("vp_efeito_base"),
         "capex_total": sum(res["capex_ano"][reg]),
         "opex_total": sum(res["opex_ano"]),
-        "receita_total": sum(res.get("receita_ano") or []),
+        # As DUAS parcelas — ver a nota no topo desta funcao. O mesmo numero que
+        # `run_ano.receita_total` soma ao longo do horizonte.
+        "receita_total": sum(rec_nov_ano) + sum(efeito_base_ano),
         "obras_total": len(cen.obras),
         "obras_construidas": sum(1 for oid, y in plano.items()
                                  if y is not None and cen.obras[oid].eh_aegea()),
@@ -346,10 +369,9 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
 
     # -------------------------------------------------------------- run_ano
     g = res["capex_ano"][reg]; t = cen.orc[reg]
-    op = res["opex_ano"]; rc = res.get("receita_ano") or [0.0] * anos
-    # efeito-base NOMINAL por ano: usa o do engine (v51+) se houver; senao calcula do cen
-    # (assim a persistencia nao depende da versao do engine para o EBITDA).
-    eb = res.get("efeito_base_ano") or _efeito_base_ano_cen(cen, res, anos)
+    op = res["opex_ano"]
+    rc = rec_nov_ano           # as duas series nascem no topo da funcao, e o KPI usa as
+    eb = efeito_base_ano       # MESMAS: ver a nota la sobre as duas parcelas da receita
     ebt = res.get("ebitda_ano")
     lin = []
     acum_eb = 0.0
