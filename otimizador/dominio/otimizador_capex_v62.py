@@ -259,6 +259,11 @@ def _dimensiona_etes(cen,plano):
             e.capex=cap; e.necessaria=(n>0)
             e.capex_comp={f"ETE {n} mod":cap} if n>0 else {}
         e.responsavel="Aegea" if e.capex>1e-9 else "-"
+        # A MESMA INFORMACAO NO MODO MODULAR, onde a ETE e UMA obra com `n_mod` modulos.
+        # `_dimensiona_etes` roda a cada avaliacao, entao isto acompanha o plano.
+        e.quantidade=e.n_mod or None
+        e.unidade="modulo" if e.n_mod else None
+        e.preco_unitario=e.capex_modulo if e.n_mod else None
     return dem
 
 # ---------- economia (MENSAL: prazos/lag/maturidade em MESES; desconto/agregacao ANUAL via ano=mes//12)
@@ -1478,6 +1483,16 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                 # isto, e nao o numero de OBRAS — senao um pacote de 3 vira '1 modulo'.
                 mo.cap_modulo=cap_pacote; mo.folga=0.0; mo.modidx=0; mo.e_pacote=True
                 mo.n_modulos=eo.modulos
+                # QUANTOS MODULOS, E A QUE PRECO. Sem isto a linha da ETE no resultado
+                # saia sem quantidade e sem unitario — o unico elemento do plano que nao
+                # dizia de onde vinha o CAPEX dele.
+                #
+                # O CAPEX DO PACOTE NAO E `quantidade x preco`: ele inclui o TERRENO. Por
+                # isso o `capex_comp` sai com as duas parcelas em entradas separadas, e
+                # quem exibe soma a diferenca como o que ela e.
+                mo.quantidade=eo.modulos; mo.unidade="modulo"; mo.preco_unitario=eo.capex_modulo
+                mo.capex_comp={f"ETE nova: {eo.modulos} modulo(s)":eo.modulos*eo.capex_modulo}
+                if eo.capex_terreno>1e-9: mo.capex_comp["ETE nova: terreno"]=eo.capex_terreno
                 lst=[mo]; obras.append(mo)
                 # A EXPANSAO. `depende_do_pacote` existe porque sem ela o otimizador
                 # compraria um modulo barato ANTES do pacote caro para liberar vazao mais
@@ -1490,6 +1505,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                             obrigatoria=0,proibida_ate=eo.proibida_ate,wacc=eo.wacc)   # expansao nunca e obrigatoria
                     mx.cap_modulo=eo.cap_modulo; mx.folga=0.0; mx.modidx=k; mx.depende_do_pacote=True
                     mx.n_modulos=1
+                    mx.quantidade=1; mx.unidade="modulo"; mx.preco_unitario=eo.capex_modulo
                     lst.append(mx); obras.append(mx)
             else:                                        # EXPANSAO: ramp de modulos conforme a vazao excede a folga
                 exc=max(0.0,_sf.get(sisn,0.0)-eo.folga)
@@ -1500,6 +1516,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                             obrigatoria=(getattr(eo,"obrig",0) if k==1 else 0),   # ETE obrigatoria -> 1o modulo obrigatorio; demais por demanda
                             proibida_ate=eo.proibida_ate,wacc=eo.wacc)
                     mo.cap_modulo=eo.cap_modulo; mo.folga=eo.folga; mo.modidx=k; mo.n_modulos=1
+                    mo.quantidade=1; mo.unidade="modulo"; mo.preco_unitario=eo.capex_modulo
                     lst.append(mo); obras.append(mo)
             modulos_sis[sisn]=lst
     _set_forma_adocao(curva_adocao)
