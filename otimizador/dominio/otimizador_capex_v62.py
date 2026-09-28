@@ -205,13 +205,29 @@ def _dimensiona_etes(cen,plano):
             e.capex_comp={"ETE (capex fixo)":e.capex} if e.necessaria else {}
             e.responsavel="Aegea" if e.capex>1e-9 else "-"
             continue
-        if getattr(e,"nova",False):                             # ETE NOVA (pacote unico: terreno + modulos dados)
-            e.n_mod=e.modulos
-            e.cap_max=e.modulos*e.cap_modulo                    # TETO de vazao
-            e.necessaria=(d>1e-9)                               # qualquer vazao conectada exige a ETE nova
-            cap=(e.capex_terreno+e.modulos*e.capex_modulo) if e.necessaria else 0.0
+        if getattr(e,"nova",False):                             # ETE NOVA: pacote obrigatorio + expansao por demanda
+            # O PACOTE INICIAL E EXATAMENTE `modulos`, e nao uma conta. E a ETE como foi
+            # projetada: se ela e necessaria, ela nasce com esses modulos, ainda que a
+            # demanda conectada caiba em menos.
+            #
+            # O QUE MUDOU EM 28/09/2026: a demanda que passa do pacote NAO invalida mais o
+            # plano — ela pede modulos a mais, exatamente como numa ETE existente. Antes
+            # `cap_max` era teto duro e `viavel()` rejeitava o plano inteiro; com
+            # `modulos` em branco isso dava teto ZERO, e o sistema inteiro ficava fora de
+            # qualquer plano sem uma linha de aviso (69 ETEs assim na base de 09/2026,
+            # cobrindo 337 sub-bacias).
+            e.necessaria=(d>1e-9)
+            _cap_pac=e.modulos*e.cap_modulo                     # capacidade do pacote
+            _exc=max(0.0,d-_cap_pac)                            # o que sobra para a expansao
+            _extra=int(math.ceil(_exc/e.cap_modulo)) if (_exc>1e-9 and e.cap_modulo>0) else (1 if _exc>1e-9 else 0)
+            e.n_mod=e.modulos+_extra
+            e.cap_max=None                                      # sem teto: a expansao acompanha a demanda
+            cap=(e.capex_terreno+e.n_mod*e.capex_modulo) if e.necessaria else 0.0
             e.capex=cap
-            e.capex_comp={f"ETE nova: terreno + {e.modulos} mod":cap} if e.necessaria else {}
+            e.capex_comp=({f"ETE nova: terreno + {e.modulos} mod":e.capex_terreno+e.modulos*e.capex_modulo}
+                          if e.necessaria else {})
+            if e.necessaria and _extra>0:
+                e.capex_comp[f"ETE nova: expansao {_extra} mod"]=_extra*e.capex_modulo
         else:                                                   # EXPANSAO (calcula modulos pela vazao)
             exc=max(0.0,d-e.folga)
             n=int(math.ceil(exc/e.cap_modulo)) if (exc>1e-9 and e.cap_modulo>0) else (1 if exc>1e-9 else 0)
@@ -452,20 +468,47 @@ def avaliar(cen,plano):
         elig[o.id]=True; chain_last[o.id]=max((ready[r.id] for r in reqs),default=0)
     # ---- TRAVA DE CAPACIDADE: modulos sao obras que liberam vazao ao longo do tempo ----
     if FAS:
+        # A TRAVA CONTA CAPACIDADE, E NAO MODULOS (28/09/2026).
+        #
+        # Ela fazia `teto((vazao - folga)/cap_modulo)` e comparava com quantos modulos
+        # estavam construidos — o que so vale se TODO modulo tiver a mesma capacidade. A
+        # ETE nova quebrou essa premissa: o pacote inicial vale `modulos x cap_modulo` e
+        # cada modulo de expansao vale `cap_modulo`. Contando cabecas, um pacote de quatro
+        # modulos valeria o mesmo que um modulo solto.
+        #
+        # Somando capacidade na ORDEM DE CONCLUSAO, o resultado e o mesmo de antes onde os
+        # modulos sao iguais, e passa a ser correto onde nao sao.
         for sis,e in cen.ete_do_sistema.items():
             mods=getattr(cen,"modulos_sis",{}).get(sis,[])
-            rtp=sorted((ready[m.id],m.id) for m in mods if ready.get(m.id) is not None)
-            nb=len(rtp)
+            # O pacote da ETE nova precede a expansao dela: um modulo de expansao concluido
+            # antes do pacote so passa a valer quando o pacote fica pronto.
+            _r_pac=next((ready[m.id] for m in mods
+                         if getattr(m,"e_pacote",False) and ready.get(m.id) is not None), None)
+            rtp=[]
+            for m in mods:
+                r=ready.get(m.id)
+                if r is None: continue
+                if getattr(m,"depende_do_pacote",False):
+                    if _r_pac is None: continue          # pacote nao construido -> a expansao nao existe
+                    r=max(r,_r_pac)
+                rtp.append((r,getattr(m,"cap_modulo",0.0) or 0.0,m.id))
+            rtp.sort()
+            _acum=[];_s=0.0
+            for _r,_c,_mid in rtp: _s+=_c; _acum.append(_s)
             cs=sorted((o for o in cen.coletas if elig.get(o.id) and cen.nos[o.no].sistema==sis),
                       key=lambda o: chain_last[o.id])
             cum=0.0
             for o in cs:
                 cum+=cen.vazao.get(o.no,0.0)
-                need=int(math.ceil(max(0.0,cum-e.folga)/e.cap_modulo)) if e.cap_modulo>0 else (1 if cum>e.folga else 0)
-                if need>nb:                              # nao ha modulos construidos suficientes -> nao fatura
-                    elig[o.id]=False
-                    motivo[o.id]="SEM RECEITA: capacidade da ETE insuficiente (faltam modulos construidos)."
-                    continue
+                falta=max(0.0,cum-e.folga)
+                if falta<=1e-9:
+                    need=0
+                else:
+                    need=next((j+1 for j,_cp in enumerate(_acum) if _cp>=falta-1e-9),None)
+                    if need is None:                     # capacidade construida nao alcanca -> nao fatura
+                        elig[o.id]=False
+                        motivo[o.id]="SEM RECEITA: capacidade da ETE insuficiente (faltam modulos construidos)."
+                        continue
                 need_o[o.id]=need
                 if need>0: chain_last[o.id]=max(chain_last[o.id],rtp[need-1][0])
     # ---- inicio de faturamento (calculado ANTES da receita, p/ montar a cobertura REALIZADA) ----
@@ -500,11 +543,24 @@ def avaliar(cen,plano):
     if FAS:                                              # OPEX de cada modulo comeca com a receita que ele libera
         for sis,e in cen.ete_do_sistema.items():
             mods=getattr(cen,"modulos_sis",{}).get(sis,[])
-            rtp=sorted((ready[m.id],m.id) for m in mods if ready.get(m.id) is not None)
+            # MESMA ORDEM DA TRAVA la de cima (conclusao, com o pacote precedendo a sua
+            # expansao): `need_o` e um indice nesta lista, e duas ordens diferentes fariam
+            # o OPEX comecar no modulo errado.
+            _r_pac=next((ready[m.id] for m in mods
+                         if getattr(m,"e_pacote",False) and ready.get(m.id) is not None), None)
+            rtp=[]
+            for m in mods:
+                r=ready.get(m.id)
+                if r is None: continue
+                if getattr(m,"depende_do_pacote",False):
+                    if _r_pac is None: continue
+                    r=max(r,_r_pac)
+                rtp.append((r,getattr(m,"cap_modulo",0.0) or 0.0,m.id))
+            rtp.sort()
             for o in cen.coletas:
                 if not elig.get(o.id) or cen.nos[o.no].sistema!=sis: continue
                 for j in range(need_o.get(o.id,0)):
-                    mid=rtp[j][1]; f=inicio[o.id]
+                    mid=rtp[j][2]; f=inicio[o.id]
                     if mid not in opex_ini or f<opex_ini[mid]: opex_ini[mid]=f
     for oid,o in cen.obras.items():
         if o.opex_ano<=0: continue
@@ -680,9 +736,11 @@ def meses_permitidos(cen,o):
 
 def viavel(cen,plano):
     _dimensiona_etes(cen,plano)
-    for e in cen.ete_do_sistema.values():
-        if getattr(e,"nova",False) and e.cap_max is not None and e.demanda>e.cap_max+1e-9:
-            return False,f"ETE nova {e.id}: vazao conectada {e.demanda:.0f} > capacidade {e.cap_max:.0f}"
+    # A TRAVA DE CAPACIDADE DA ETE NOVA SAIU DAQUI (28/09/2026). Ela rejeitava o plano
+    # inteiro quando a vazao conectada passava de `modulos x cap_modulo` — e com
+    # `modulos` em branco o teto era zero, o que excluia o sistema de qualquer plano sem
+    # dizer nada. Agora a demanda acima do pacote vira modulo de expansao, como na ETE
+    # existente: vira CUSTO no plano, que o otimizador pesa, e nao um plano impossivel.
     anos=cen.anos;capex={reg:[0.0]*anos for reg in cen.regionais}
     for oid,y in plano.items():
         o=cen.obras[oid]
@@ -1351,16 +1409,31 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         for eo in [o for o in obras if o.tipo=="ete"]:
             sisn=eo.sistema; eo.opex_ano=0.0            # ETE de referencia vira container (nao custa)
             lst=[]
-            if getattr(eo,"nova",False):                # NOVA = PACOTE FIXO: todos os 'modulos' de uma vez; capacidade fixa
+            if getattr(eo,"nova",False):                # NOVA = PACOTE OBRIGATORIO + expansao faseada por demanda
+                # A ETAPA INICIAL NAO MUDOU: um pacote com o terreno e EXATAMENTE os
+                # `modulos` do cadastro, indivisivel. O que mudou em 28/09/2026 e que a
+                # demanda acima dele passa a pedir modulos de expansao, faseados como os de
+                # uma ETE existente — antes ela nao expandia, e a vazao que nao coubesse
+                # invalidava o plano.
                 eo.folga=0.0
-                cap_total=eo.modulos*eo.cap_modulo
+                cap_pacote=eo.modulos*eo.cap_modulo
                 capex_total=eo.capex_terreno+eo.modulos*eo.capex_modulo
                 mo=Obra(f"{eo.id}#nova","ete_mod",sistema=sisn,capex_comp={f"ETE nova ({eo.modulos} mod + terreno)":capex_total},
                         opex_ano=eo.modulos*eo.opex_por_modulo,prazo_inicio=eo.prazo_inicio,prazo_exec=eo.prazo,
                         obrigatoria=getattr(eo,"obrig",0),proibida_ate=eo.proibida_ate,wacc=eo.wacc)   # ETE obrigatoria -> o pacote e obrigatorio
-                mo.cap_modulo=cap_total; mo.folga=0.0; mo.modidx=1
-                eo.cap_modulo=cap_total                  # o gating usa a capacidade TOTAL do pacote (teto de vazao)
+                mo.cap_modulo=cap_pacote; mo.folga=0.0; mo.modidx=0; mo.e_pacote=True
                 lst=[mo]; obras.append(mo)
+                # A EXPANSAO. `depende_do_pacote` existe porque sem ela o otimizador
+                # compraria um modulo barato ANTES do pacote caro para liberar vazao mais
+                # cedo — expandir uma estacao que ainda nao existe. O gating le essa marca.
+                _exc=max(0.0,_sf.get(sisn,0.0)-cap_pacote)
+                K=int(math.ceil(_exc/eo.cap_modulo)) if (_exc>1e-9 and eo.cap_modulo>0) else (1 if _exc>1e-9 else 0)
+                for k in range(1,K+1):
+                    mx=Obra(f"{eo.id}#x{k}","ete_mod",sistema=sisn,capex_comp={f"ETE nova: expansao modulo {k}":eo.capex_modulo},
+                            opex_ano=eo.opex_por_modulo,prazo_inicio=eo.prazo_inicio,prazo_exec=eo.prazo,
+                            obrigatoria=0,proibida_ate=eo.proibida_ate,wacc=eo.wacc)   # expansao nunca e obrigatoria
+                    mx.cap_modulo=eo.cap_modulo; mx.folga=0.0; mx.modidx=k; mx.depende_do_pacote=True
+                    lst.append(mx); obras.append(mx)
             else:                                        # EXPANSAO: ramp de modulos conforme a vazao excede a folga
                 exc=max(0.0,_sf.get(sisn,0.0)-eo.folga)
                 K=int(math.ceil(exc/eo.cap_modulo)) if (exc>1e-9 and eo.cap_modulo>0) else (1 if exc>1e-9 else 0)
