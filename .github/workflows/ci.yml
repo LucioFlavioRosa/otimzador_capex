@@ -37,7 +37,11 @@ jobs:
           # 3.12: o que o Databricks Runtime serve hoje. Subir aqui antes de
           # subir lá testaria um Python que a produção não roda.
           python-version: '3.12'
-          cache: pip
+          # SEM `cache: pip`: ele exige um `requirements.txt` ou `pyproject.toml`
+          # para gerar a chave, e aqui o arquivo chama-se `requirements-prod.txt` —
+          # que, de propósito, NÃO é o que este job instala. Apontar o cache para um
+          # arquivo que o job não usa seria uma chave que não descreve o que ela
+          # guarda. Instalar as quatro do zero custa menos de um minuto.
 
       - name: Dependências
         run: pip install pytest pandas matplotlib ortools

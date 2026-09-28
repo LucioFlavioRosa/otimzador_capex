@@ -265,10 +265,11 @@ def test_a_area_do_coletor_e_contada_UMA_vez_o_universo_da_unidade_e_o_mesmo_nos
     off = silent(M.ler_banco, _sem_potencial(_com_colunas(COM_CTS_EXATA)), usar_cts=False)
     assert sum(on.max_lig.values()) == pytest.approx(3900.0)
     assert sum(off.max_lig.values()) == pytest.approx(3900.0)
-    # O ticket da b1 e o da parte que sobrou para ela: 90.000 / 200 com o coletor. (Nao e
+    # O ticket da b1 e o da parte que sobrou para ela: 90.000 / 500 com o coletor — a
+    # conta e RECEITA / UNIVERSO desde 28/09/2026, e nao receita / atuais. (Nao e
     # invariante que ele iguale o de sem coletor — a fixture reparte a receita na
     # proporcao das ligacoes, e por isso aqui coincide; na base real nao precisa.)
-    assert on.sub_receita["b1"]["ticket"] == pytest.approx(90000 / 200)
+    assert on.sub_receita["b1"]["ticket"] == pytest.approx(90000 / 500)
 
 
 def _com_cidade(abas):
