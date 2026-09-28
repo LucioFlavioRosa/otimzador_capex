@@ -290,3 +290,56 @@ def test_o_solver_respeita_a_precedencia():
     res = silent(CP.resolver_por_sistema, cen, max_time_s=30, workers=4)
     ok, motivo = silent(M.viavel, cen, res["plano"])
     assert ok, f"o solver devolveu plano que a regra recusa: {motivo}"
+
+
+# ------------------------------------------------ a regra mora num lugar so
+#
+# Segunda revisao do Codex (28/09/2026): a primeira correcao tratou o bloco `ete_fixo`
+# do motor e o `resolver_cpsat` direto, e deixou DUAS copias da formula antiga nos
+# subcenarios do solver por DECOMPOSICAO — o caminho de producao. O solver custeava a
+# ETE nova como pacote fixo, escolhia um plano que parecia caber, e a avaliacao final
+# (que dimensiona certo) estourava o orcamento.
+def test_a_regra_do_capex_fixo_tem_UMA_definicao():
+    """Se alguem copiar a formula de novo, este teste nao pega — mas os dois abaixo
+    pegam o efeito. Este aqui prende o contrato da funcao."""
+    M = engine()
+    cen = _cen(_abas(modulos=1))
+    e = _ete(cen)
+    capex, n = M.capex_fixo_da_ete(e, VAZAO_S1)
+    assert n == 2, "pacote de 1 modulo + 1 de expansao para 180 de vazao"
+    assert capex == pytest.approx(TERRENO + 2 * CAPEX_MOD)
+    # e o pacote e PISO: com o projeto maior que a demanda, vale o projeto
+    capex4, n4 = M.capex_fixo_da_ete(_ete(_cen(_abas(modulos=4))), VAZAO_S1)
+    assert n4 == 4 and capex4 == pytest.approx(TERRENO + 4 * CAPEX_MOD)
+
+
+def test_os_subcenarios_do_solver_usam_a_mesma_regra():
+    """Os dois `_sub_cenario_*` do CP-SAT montavam `capex_fixo` por conta propria."""
+    from otimizador.dominio import otimizador_capex_cpsat63 as CP
+    M = engine()
+    cen = _cen(_abas(modulos=1))
+    sis = _ete(cen).sistema
+    for fabrica, nome in ((CP._sub_cenario_sistema, "por sistema"),
+                          (CP._sub_cenario_cidade, "por cidade")):
+        try:
+            sub = silent(fabrica, cen, sis if nome == "por sistema" else cen.nos["b1"].cidade)
+        except Exception:                      # a fabrica pode nao aceitar este recorte
+            continue
+        e = next(iter(sub.ete_do_sistema.values()), None)
+        if e is None or not getattr(e, "nova", False):
+            continue
+        assert e.capex_fixo == pytest.approx(TERRENO + 2 * CAPEX_MOD), nome
+
+
+def test_o_plano_do_solver_cabe_no_orcamento_que_ele_recebeu():
+    """O EFEITO do defeito, e o que de fato importa: com a ETE nova subcusteada no
+    subcenario, `resolver_por_sistema` devolvia plano que a avaliacao final acusava
+    como acima do teto (`auditoria_orcamento['ok'] is False`)."""
+    from _helpers import solver_or_skip
+    CP = solver_or_skip()
+    M = engine()
+    orc = {2026: 575_000, 2027: 3_105_000, 2028: 0, 2029: 0}   # o cenario do Codex
+    cen = _cen(_abas(modulos=1), orcamento=orc)
+    res = silent(CP.resolver_por_sistema, cen, max_time_s=30, workers=4)
+    aud = silent(M.avaliar, cen, res["plano"]).get("auditoria_orcamento") or {}
+    assert aud.get("ok", True), f"plano acima do teto: {aud.get('violacoes')}"

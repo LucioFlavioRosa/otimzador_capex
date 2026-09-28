@@ -320,10 +320,11 @@ def _sub_cenario_sistema(cen, sis):
     for n in s.nos.values(): sbmap.setdefault(n.sistema,[]).append(n.id)
     for e in s.ete_do_sistema.values():
         tot=sum(s.vazao.get(sb,0.0) for sb in sbmap.get(e.sistema,[]))
-        if getattr(e,"nova",False): e.capex_fixo=e.capex_terreno+e.modulos*e.capex_modulo
-        else:
-            exc=max(0.0,tot-e.folga)
-            e.capex_fixo=(int(math.ceil(exc/e.cap_modulo)) if (exc>1e-9 and e.cap_modulo>0) else (1 if exc>1e-9 else 0))*e.capex_modulo
+        # A REGRA E A DE `M.capex_fixo_da_ete`, e so ela. Estas DUAS copias ficaram para
+        # tras quando a ETE nova passou a expandir por demanda (28/09/2026), e o solver
+        # por decomposicao seguiu custeando a ETE nova como pacote fixo — devolvendo
+        # plano ACIMA DO ORCAMENTO, que a auditoria do resultado final acusava.
+        e.capex_fixo,_ = M.capex_fixo_da_ete(e, tot)
     return s
 
 def _montar_faseado(sub, built, shift_meses=0):
@@ -411,10 +412,11 @@ def _sub_cenario_cidade(cen, cid):
     for n in s.nos.values(): sbmap.setdefault(n.sistema,[]).append(n.id)
     for e in s.ete_do_sistema.values():
         tot=sum(s.vazao.get(sb,0.0) for sb in sbmap.get(e.sistema,[]))
-        if getattr(e,"nova",False): e.capex_fixo=e.capex_terreno+e.modulos*e.capex_modulo
-        else:
-            exc=max(0.0,tot-e.folga)
-            e.capex_fixo=(int(math.ceil(exc/e.cap_modulo)) if (exc>1e-9 and e.cap_modulo>0) else (1 if exc>1e-9 else 0))*e.capex_modulo
+        # A REGRA E A DE `M.capex_fixo_da_ete`, e so ela. Estas DUAS copias ficaram para
+        # tras quando a ETE nova passou a expandir por demanda (28/09/2026), e o solver
+        # por decomposicao seguiu custeando a ETE nova como pacote fixo — devolvendo
+        # plano ACIMA DO ORCAMENTO, que a auditoria do resultado final acusava.
+        e.capex_fixo,_ = M.capex_fixo_da_ete(e, tot)
     return s
 
 def _colunas_sistema(cen, sis, col_time_s=5, col_grid=12):

@@ -187,6 +187,30 @@ def _conectada(cen,sb,plano):
     for r in rr:
         if r.eh_aegea() and plano.get(r.id) is None: return False
     return True
+def capex_fixo_da_ete(e, vazao_total):
+    """(capex, n_modulos) de uma ETE pre-dimensionada para `vazao_total`.
+
+    E A UNICA DEFINICAO DESTA REGRA, de proposito. Ela existia em TRES copias — o bloco
+    `ete_fixo` daqui e dois subcenarios do solver por decomposicao (`_sub_cenario_*`) —,
+    e quando a ETE nova passou a expandir por demanda em 28/09/2026 duas delas ficaram
+    para tras: o solver por decomposicao seguia custeando a ETE nova como pacote fixo e
+    devolvia plano ACIMA DO ORCAMENTO, que a auditoria do resultado final acusava.
+
+    ETE NOVA: o pacote do cadastro e piso, e a vazao que passa dele pede modulos a mais.
+    ETE EM EXPANSAO: so o que a folga nao absorve.
+    """
+    cap=float(getattr(e,"cap_modulo",0.0) or 0.0)
+    def _mods(excedente):
+        if excedente<=1e-9: return 0
+        return int(math.ceil(excedente/cap)) if cap>0 else 1
+    if getattr(e,"nova",False):
+        n=int(getattr(e,"modulos",0) or 0)
+        n+=_mods(max(0.0,vazao_total-n*cap))
+        return float(getattr(e,"capex_terreno",0.0) or 0.0)+n*e.capex_modulo, n
+    n=_mods(max(0.0,vazao_total-float(getattr(e,"folga",0.0) or 0.0)))
+    return n*e.capex_modulo, n
+
+
 def _dimensiona_etes(cen,plano):
     """Define CAPEX/necessidade de cada ETE a partir da VAZAO das sub-bacias servidas (marginal),
     em modulos: n_mod = teto(max(0, vazao_nova - folga)/cap_modulo)."""
@@ -1690,19 +1714,8 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         for e in cen.ete_do_sistema.values():
             tot=sum(cen.vazao.get(sb,0.0) for sb in sbmap.get(e.sistema,[]))
             _opm=getattr(e,"opex_por_modulo",e.opex_ano)
-            if getattr(e,"nova",False):
-                # A EXPANSAO TAMBEM VALE AQUI (28/09/2026). O modo fixo pre-dimensiona para a
-                # vazao TOTAL do sistema; deixar a ETE nova no pacote do cadastro faria este
-                # modo subestimar CAPEX e OPEX sempre que a vazao passasse do projeto — que e
-                # exatamente o caso que a mudanca veio tratar.
-                _exc=max(0.0,tot-e.modulos*e.cap_modulo)
-                _ex=int(math.ceil(_exc/e.cap_modulo)) if (_exc>1e-9 and e.cap_modulo>0) else (1 if _exc>1e-9 else 0)
-                _n=e.modulos+_ex
-                e.capex_fixo=e.capex_terreno+_n*e.capex_modulo; e.opex_ano=_n*_opm
-            else:
-                exc=max(0.0,tot-e.folga)
-                nn=int(math.ceil(exc/e.cap_modulo)) if (exc>1e-9 and e.cap_modulo>0) else (1 if exc>1e-9 else 0)
-                e.capex_fixo=nn*e.capex_modulo; e.opex_ano=nn*_opm
+            # A REGRA MORA EM `capex_fixo_da_ete`, e so la — ver a nota na funcao.
+            e.capex_fixo,_n=capex_fixo_da_ete(e,tot); e.opex_ano=_n*_opm
     cen.usar_cts=bool(usar_cts)
     # cts_ids = SO as CTS efetivamente carregadas nesta unidade (interseccao com os nos), nao a aba inteira
     cen.cts_ids=(set(_cts_op) & set(cen.nos)) if usar_cts else set()
