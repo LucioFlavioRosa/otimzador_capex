@@ -10,8 +10,19 @@ import pytest
 from _helpers import load_cts, build_all, capex_total, cobertura_fim, silent, solver_or_skip
 
 # valores de referencia (banco_teste_CTS_poc_v2) — congelados em 2026-07
+#
+# O VPL DOS DOIS CENARIOS MUDOU EM 28/09/2026, e a mudanca e intencional: o ticket passou
+# a sair das ligacoes TOTAIS (`universo_ligacoes`) e nao das atuais — defeito relatado
+# pelo dono do produto, ver `test_ticket_por_ligacoes_totais.py`. Na fixture o universo e
+# 2,3x a 3,0x as atuais, e o ticket caiu na mesma proporcao:
+#
+#   ligado      vpl  107,30 -> 38,59 Mi
+#   desligado   vpl   82,62 -> 29,36 Mi
+#
+# NADA MAIS MUDOU — capex, cobertura, universo, vazao, obras e n_cts estao iguais nos dois
+# cenarios, e e essa a conferencia de que a correcao mexeu so na RECEITA.
 GOLDEN = {
-    True:  dict(vpl=107303304.663241, capex=6476000.0, cobertura=4800.0,
+    True:  dict(vpl=38591020.989545, capex=6476000.0, cobertura=4800.0,
                 universo=5100.0, vazao=430.0, obras=28, n_cts=2),
     # O CENARIO DESLIGADO MUDOU EM 14/08/2026, e a mudanca e intencional. A linha da CTS
     # deixou de ser somada na sub-bacia: a unica diferenca entre ligado e desligado passou
@@ -31,7 +42,7 @@ GOLDEN = {
     # fixture, o motor le a sub-bacia inteira nos dois modos — no ligado, ALERTANDO que a
     # area do coletor conta duas vezes. Base COM as colunas e o caso que
     # `test_cts.py::test_a_area_do_coletor_e_contada_uma_vez_em_cada_cenario` cobre.
-    False: dict(vpl=82624810.346347, capex=5640000.0, cobertura=3900.0,
+    False: dict(vpl=29357901.264997, capex=5640000.0, cobertura=3900.0,
                 universo=3900.0, vazao=340.0, obras=20, n_cts=0),
 }
 

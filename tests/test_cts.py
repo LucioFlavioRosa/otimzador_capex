@@ -91,15 +91,16 @@ def test_desligado_paga_menos_CAPEX_e_a_receita_segue_o_ticket_de_quem_atende(
     CTS nao e mais herdada pela sub-bacia.
 
     Sem o coletor, as ligacoes que ele atenderia passam a ser ligadas pelas obras da
-    sub-bacia — e cobradas pelo TICKET DELA. Na fixture, `cts2` fatura 480 por ligacao e
-    a `b4` que a absorve, 288: o plano desligado liga a mesma gente por menos dinheiro.
+    sub-bacia — e cobradas pelo TICKET DELA. Na fixture, `cts2` fatura 180 por ligacao e
+    a `b4` que a absorve, 120: o plano desligado liga a mesma gente por menos dinheiro.
 
     O que continua valendo sempre e o CAPEX. O VPL depende de qual ticket e maior, e
     fixar um sentido aqui seria fixar um acidente desta fixture.
     """
     assert capex_total(cen_off, res_off) < capex_total(cen_on, res_on)
-    _t_cts = 90000 / 200      # cts1: mesmo ticket da b1 que a absorve
-    _t_b1 = 180000 / 400
+    # O ticket sai pelas ligacoes TOTAIS (`universo_ligacoes`), nao pelas atuais.
+    _t_cts = 90000 / 500      # cts1: mesmo ticket da b1 que a absorve
+    _t_b1 = 180000 / 1000
     assert _t_cts == pytest.approx(_t_b1), "a fixture mudou; reveja o raciocinio acima"
 
 
@@ -167,8 +168,9 @@ def test_com_cts_a_sub_bacia_le_a_coluna_com_cts():
     # b1, b2 e cts1 estao na mesma cidade. O universo EFETIVO ja leva o potencial:
     #   b1 = 800 (com_cts) x 1,0 + b2 = 900 x 1,0 + cts1 = 500 x 1,2 = 2300
     assert on.max_lig[cid] == pytest.approx(2300.0)
-    # A receita tambem e a `_com_cts` (base arrecadada, o padrao): 144.000 / 350.
-    assert on.sub_receita["b1"]["ticket"] == pytest.approx(144000 / 350)
+    # A receita tambem e a `_com_cts` (base arrecadada, o padrao), e o denominador e o
+    # universo `_com_cts`: 144.000 / 800. Inteira seriam 180.000 / 1.000.
+    assert on.sub_receita["b1"]["ticket"] == pytest.approx(144000 / 800)
 
 
 def test_a_area_do_coletor_e_contada_uma_vez_em_cada_cenario():
@@ -196,7 +198,7 @@ def test_sem_cts_a_coluna_com_cts_e_ignorada():
     off_com = silent(M.ler_banco, arq, usar_cts=False)
     off_sem = silent(M.ler_banco, banco(BANK_CTS), usar_cts=False)
     assert sum(off_com.max_lig.values()) == pytest.approx(sum(off_sem.max_lig.values()))
-    assert off_com.sub_receita["b1"]["ticket"] == pytest.approx(180000 / 400)
+    assert off_com.sub_receita["b1"]["ticket"] == pytest.approx(180000 / 1000)
 
 
 def test_sem_a_coluna_a_sub_bacia_entra_inteira_e_ALERTA(capsys):
