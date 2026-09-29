@@ -176,25 +176,26 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
     dec = M.vpl_por_subbacia(cen, res)
     fat = res.get("fator_esgoto_ano", {}) or {}
     aud = res.get("auditoria_orcamento", {}) or {}
-    # A RECEITA DO PLANO TEM DUAS PARCELAS, e as duas somam no total.
+    # A RECEITA DO PLANO E SO A DAS LIGACOES NOVAS (28/09/2026).
     #
-    #   `receita_ano`      as ligacoes NOVAS que as obras habilitam;
+    #   `receita_ano`      as ligacoes NOVAS que as obras habilitam — E ISTO QUE CONTA;
     #   `efeito_base_ano`  o EFEITO-BASE: a base JA ATENDIDA passa a pagar a nova
     #                      equivalencia quando a cobertura da cidade sobe de faixa.
+    #                      CALCULADO E FORA DA CONTA, por decisao do dono do produto:
+    #                      e receita que apareceria sem o plano.
     #
     # As duas series nascem aqui, antes do `run_meta`, porque `run_meta.receita_total` e
-    # `run_ano.receita_total` TEM DE SER O MESMO NUMERO. Ate 28/09/2026 o total do
-    # `run_meta` somava so a primeira parcela, e o resultado era uma rodada em que o KPI
-    # de Receita ficava 10,8% abaixo da soma da propria serie anual que a tela desenha
-    # (R$ 245,5 milhoes numa rodada de 24 anos) — e o EBITDA total herdava a mesma
-    # diferenca, porque sai de `receita_total - opex_total`.
+    # `run_ano.receita_total` TEM DE SER O MESMO NUMERO — e agora as duas somam so a
+    # primeira parcela. (Houve o oposto: ate 28/09/2026 o total do `run_meta` somava so
+    # as novas enquanto a serie anual somava as duas, e o KPI ficava 10,8% abaixo da
+    # propria serie que a tela desenha. A licao continua valendo: as duas do mesmo jeito.)
     #
     # O efeito-base usa a serie do engine (v51+) quando ela existe; senao a persistencia
     # calcula do cenario, para nao depender da versao do engine.
     #
-    # QUEM PRECISA DAS PARCELAS SEPARADAS le `run_ano`, que traz as duas em coluna
-    # propria (`receita` e `receita_efeito_base`). Nao ha coluna nova no `run_meta`: ela
-    # obrigaria migracao de schema para repetir um corte que a serie anual ja da.
+    # ONDE VER O QUE FICOU DE FORA: `run_ano.receita_efeito_base`, em coluna propria e em
+    # valores nominais. Nao ha coluna nova no `run_meta`: ela obrigaria migracao de schema
+    # para repetir um corte que a serie anual ja da.
     rec_nov_ano = res.get("receita_ano") or [0.0] * anos
     efeito_base_ano = res.get("efeito_base_ano") or _efeito_base_ano_cen(cen, res, anos)
     T = {}
@@ -226,12 +227,18 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
         "milp_bound": res.get("milp_bound"),
         "vpl": res.get("vpl"),
         "vpl_obj": res.get("vpl_obj"),
-        "vp_efeito_base": res.get("vp_efeito_base"),
+        # ZERO DE PROPOSITO, e nao esquecimento. Esta coluna quer dizer "QUANTO DO `vpl`
+        # ACIMA E EFEITO-BASE" — e por isso que o backend a SUBTRAI para mostrar o VPL do
+        # produto. Desde 28/09/2026 o motor nao soma o efeito ao `vpl`, entao a parcela a
+        # subtrair e zero, e publicar o valor calculado faria o backend descontar duas
+        # vezes. As rodadas antigas seguem com o valor delas, e continuam corretas.
+        # O efeito continua visivel em `run_ano.receita_efeito_base`.
+        "vp_efeito_base": 0.0,
         "capex_total": sum(res["capex_ano"][reg]),
         "opex_total": sum(res["opex_ano"]),
-        # As DUAS parcelas — ver a nota no topo desta funcao. O mesmo numero que
+        # SO AS LIGACOES NOVAS — ver a nota no topo desta funcao. O mesmo numero que
         # `run_ano.receita_total` soma ao longo do horizonte.
-        "receita_total": sum(rec_nov_ano) + sum(efeito_base_ano),
+        "receita_total": sum(rec_nov_ano),
         "obras_total": len(cen.obras),
         "obras_construidas": sum(1 for oid, y in plano.items()
                                  if y is not None and cen.obras[oid].eh_aegea()),
@@ -322,7 +329,9 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
             "motivo_sem_receita": (res.get("motivo") or {}).get(c.id) if c else None,
             "vpl": d.get("vpl"), "vp_capex_rateado": d.get("capex"), "vp_opex_rateado": d.get("opex"),
             "vp_receita_direta": d.get("rec_dir"), "vp_receita_indireta": d.get("rec_ind"),
-            "vp_efeito_base": d.get("efeito_base"),
+            # ZERO pela mesma razao do `run_meta`: `vpl` acima nao inclui o efeito, e o
+            # backend subtrai esta coluna para mostrar o VPL do produto da sub-bacia.
+            "vp_efeito_base": 0.0,
             "pot_vp_receita": ec.get("vp_receita"), "pot_vp_capex_solo": ec.get("vp_capex_solo"),
             "pot_vp_capex_rateado": ec.get("vp_capex_rateado"), "pot_vp_opex": ec.get("vp_opex"),
             "pot_saldo_solo": ec.get("saldo_solo"), "pot_saldo_rateado": ec.get("saldo_rateado"),
@@ -370,8 +379,8 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
     # -------------------------------------------------------------- run_ano
     g = res["capex_ano"][reg]; t = cen.orc[reg]
     op = res["opex_ano"]
-    rc = rec_nov_ano           # as duas series nascem no topo da funcao, e o KPI usa as
-    eb = efeito_base_ano       # MESMAS: ver a nota la sobre as duas parcelas da receita
+    rc = rec_nov_ano           # as series nascem no topo da funcao, e o KPI usa as MESMAS
+    eb = efeito_base_ano       # (so informativa desde 28/09/2026 — ver a nota la)
     ebt = res.get("ebitda_ano")
     lin = []
     acum_eb = 0.0
@@ -379,7 +388,10 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
         teto = t[y] if y < len(t) else 0.0
         rec_nov = rc[y] if y < len(rc) else 0.0
         ef = eb[y] if y < len(eb) else 0.0
-        rec_total = rec_nov + ef
+        # `receita_total` E A RECEITA QUE CONTA, e desde 28/09/2026 ela e so a das
+        # ligacoes novas. `receita_efeito_base` fica ao lado, informativa, para se ver o
+        # que ficou de fora — somar as duas aqui reporia no total o que o VPL ja nao conta.
+        rec_total = rec_nov
         ebitda = ebt[y] if (ebt and y < len(ebt)) else (rec_total - op[y])
         acum_eb += ebitda
         lin.append({"run_id": rid, "ano": ab + y, "ano_indice": y,

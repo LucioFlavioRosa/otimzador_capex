@@ -21,8 +21,18 @@ from _helpers import load_cts, build_all, capex_total, cobertura_fim, silent, so
 #
 # NADA MAIS MUDOU — capex, cobertura, universo, vazao, obras e n_cts estao iguais nos dois
 # cenarios, e e essa a conferencia de que a correcao mexeu so na RECEITA.
+#
+# O VPL MUDOU DE NOVO EM 28/09/2026, tambem de proposito: O EFEITO-BASE SAIU DA CONTA
+# (decisao do dono do produto — so entra receita de LIGACAO NOVA). A diferenca reconcilia
+# AO CENTAVO com a parcela excluida, e e essa a prova de que nada mais mexeu:
+#
+#   ligado      38.591.020,99 = 33.053.288,92 + 5.537.732,06 de efeito-base
+#   desligado   29.357.901,26 = 25.034.710,96 + 4.323.190,31 de efeito-base
+#
+# `vp_efeito_base` continua no retorno de `avaliar` (e e ele que fecha a conta acima), mas
+# `vpl` nao o soma mais. Ver `test_receita_total_fecha.py`.
 GOLDEN = {
-    True:  dict(vpl=38591020.989545, capex=6476000.0, cobertura=4800.0,
+    True:  dict(vpl=33053288.924913, capex=6476000.0, cobertura=4800.0,
                 universo=5100.0, vazao=430.0, obras=28, n_cts=2),
     # O CENARIO DESLIGADO MUDOU EM 14/08/2026, e a mudanca e intencional. A linha da CTS
     # deixou de ser somada na sub-bacia: a unica diferenca entre ligado e desligado passou
@@ -42,7 +52,7 @@ GOLDEN = {
     # fixture, o motor le a sub-bacia inteira nos dois modos — no ligado, ALERTANDO que a
     # area do coletor conta duas vezes. Base COM as colunas e o caso que
     # `test_cts.py::test_a_area_do_coletor_e_contada_uma_vez_em_cada_cenario` cobre.
-    False: dict(vpl=29357901.264997, capex=5640000.0, cobertura=3900.0,
+    False: dict(vpl=25034710.958666, capex=5640000.0, cobertura=3900.0,
                 universo=3900.0, vazao=340.0, obras=20, n_cts=0),
 }
 
