@@ -65,6 +65,9 @@ MAPA_PARAMS = {
     # O recorte da meta. Antes era `INCLUIR_INDUSTRIAL`, que subtraia industria de
     # receita e vazao junto; hoje ele so escolhe em que moeda a COBERTURA e medida.
     "COBERTURA_SO_RESIDENCIAL": "cobertura_so_residencial",
+    #: A CTS conta na COBERTURA? (29/09/2026) Ausente = conta, que e o comportamento
+    #: de todas as rodadas anteriores. Ver `ler_banco(cts_na_cobertura=...)`.
+    "CTS_NA_COBERTURA":     "cts_na_cobertura",
     # A regua da cobertura: ligacoes (default) | economias | populacao. Era coluna
     # de cadastro por cidade ate a migracao 019 do servico.
     "UNIDADE_COBERTURA": "unidade_cobertura",

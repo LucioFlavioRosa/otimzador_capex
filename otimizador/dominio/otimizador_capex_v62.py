@@ -78,8 +78,15 @@ class Obra:
         self.quantidade=None; self.preco_unitario=None; self.unidade=None
         self.lig=float(ligacoes or 0);self.ticket_mes=float(ticket_mes or 0);self.preco_ligacao=float(preco_ligacao or 0)
         # DUAS QUANTIDADES, e nao uma. `lig` e o que a obra HABILITA — dela sai a
-        # receita, e ela e sempre o TOTAL. `lig_cob` e o que a obra conta para a
-        # COBERTURA, que pode ser so a parcela residencial.
+        # RECEITA. `lig_cob` e o que a obra conta para a COBERTURA (e para a meta, e para
+        # a faixa de paridade). Elas divergem em dois casos hoje:
+        #
+        #   recorte residencial       `lig_cob` e so a parcela residencial
+        #   CTS fora da cobertura     `lig_cob` e ZERO nos nos de CTS, e `lig` nao muda —
+        #                             a CTS continua faturando e deixa de contar na meta
+        #
+        # (Ate 28/09/2026 o comentario aqui dizia que `lig` "e sempre o TOTAL". Deixou de
+        # ser: no recorte residencial a receita passou a sair da mesma populacao da meta.)
         #
         # Antes eram a mesma coisa, e por isso o recorte residencial nao tinha como
         # existir sem mexer no VPL: subtrair industria de `lig` derrubava receita
@@ -855,7 +862,7 @@ def imprimir(cen,res,titulo="RESULTADO"):
 
 
 
-def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_faseada=False, metas_cobertura=None, peso_cobertura=0.0, foco_cobertura=None, penalidade_cobertura="meta+cobertura", data_inicio=None, orcamento_total=None, peso_cidade=None, regional=None, unidade=None, curva_adocao="scurve", base_receita="arrecadada", anos_extra_conclusao=3, usar_cts=True, cobertura_so_residencial=False, unidade_cobertura="ligacoes"):
+def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_faseada=False, metas_cobertura=None, peso_cobertura=0.0, foco_cobertura=None, penalidade_cobertura="meta+cobertura", data_inicio=None, orcamento_total=None, peso_cidade=None, regional=None, unidade=None, curva_adocao="scurve", base_receita="arrecadada", anos_extra_conclusao=3, usar_cts=True, cobertura_so_residencial=False, unidade_cobertura="ligacoes", cts_na_cobertura=True):
     """Monta o Cenario a partir das ABAS do input, no formato de JUNCOES: hierarquia em
     tabelas de ligacao, sistema-topologia (jusante), subbacia-operacional (=sub-bacia),
     componentes/ete-capex, regional-operacional. Cobertura e CONCESSAO por CIDADE
@@ -1432,7 +1439,28 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                 # gerar receita, embora as mesmas obras as conectem e o CAPEX delas continue
                 # no plano. A receita fica SUBESTIMADA nessa parcela — escolha consciente,
                 # por ser o erro barato entre os dois.
-                kw.update(ligacoes=lig_cob,ligacoes_cobertura=lig_cob,ticket_mes=_ticket_der,
+                # A CTS PODE FICAR FORA DA COBERTURA sem sair da receita (29/09/2026).
+                #
+                # Decisao do dono do produto: com `usar_cts` ligada, a tela oferece escolher
+                # se as ligacoes novas da CTS contam na cobertura. Quando NAO contam, so a
+                # coluna da cobertura zera — `ligacoes` (a receita) segue igual, porque o
+                # coletor fatura de todo jeito. E o que ele pediu: "esse botao so vai
+                # considerar ou desconsiderar as ligacoes novas de cts no calculo da
+                # cobertura".
+                #
+                # O DENOMINADOR NAO MUDA, e foi escolha dele entre duas: o universo e a base
+                # da CTS continuam em `max_lig`/`base_lig`. Ou seja, a cidade passa a ter uma
+                # parcela do universo que ninguem alcanca, e 100% deixa de ser atingivel —
+                # em Cordeiro a cobertura final cai de 90,15% para 87,51%. A alternativa
+                # (tirar a CTS inteira, numerador e denominador) daria 89,75%.
+                #
+                # A PARIDADE SEGUE ESTA REGUA, e tambem foi escolha dele: `lig_cob` alimenta
+                # `_fator_por_cobertura_realizada`, entao cruzar faixa mais tarde derruba a
+                # tarifa recorrente da cidade inteira. Ou seja A RECEITA MUDA por essa via,
+                # ainda que a receita das ligacoes novas da CTS nao mude. Ele decidiu isso
+                # sabendo, para o produto ter UMA cobertura realizada em vez de duas.
+                _cob_do_no=0.0 if (sb in _cts_ids_all and not cts_na_cobertura) else lig_cob
+                kw.update(ligacoes=lig_cob,ligacoes_cobertura=_cob_do_no,ticket_mes=_ticket_der,
                           preco_ligacao=num(so.get("preco_por_ligacao")),arrec_dir=adir,arrec_ind=aind,lag=lag,maturacao=mat)
             _o=Obra(f"{code}_{sb}",tipo,**kw)
             _o.quantidade=_q; _o.preco_unitario=_pu
@@ -1767,6 +1795,12 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
     cen.usar_cts=bool(usar_cts)
     # cts_ids = SO as CTS efetivamente carregadas nesta unidade (interseccao com os nos), nao a aba inteira
     cen.cts_ids=(set(_cts_op) & set(cen.nos)) if usar_cts else set()
+    #: A REGUA DA COBERTURA QUANTO A CTS, no cenario, para quem publica e para quem audita.
+    cen.cts_na_cobertura=bool(cts_na_cobertura)
+    if usar_cts and not cts_na_cobertura:
+        print(f"  [info] CTS FORA DA COBERTURA: {len(cen.cts_ids)} no(s) de CTS nao contam "
+              "na meta nem na faixa de paridade; a receita deles NAO muda. O universo da "
+              "CTS continua no denominador, entao 100% de cobertura deixa de ser atingivel.")
     for _n in cen.nos.values(): _n.is_cts=(_n.id in cen.cts_ids)
     _cts_na_uni={_c for _s,_c in _cts_dep.items() if _s in cen.nos}   # pares cuja sub-bacia esta no escopo
     if _cts_na_uni:
