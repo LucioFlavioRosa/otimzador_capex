@@ -39,3 +39,6 @@ _to_delete/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Relatorios de revisao do Codex: saida de ferramenta, nao codigo do motor.
+relatorio-codex-*.md
