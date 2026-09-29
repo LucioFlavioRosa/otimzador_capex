@@ -140,6 +140,23 @@ def _params_para_ler_banco(p):
     # de `ler_banco` e morreria num `int("")` — a tela manda vazio quando ninguem digitou.
     if "data_inicio" in kwargs and (kwargs["data_inicio"] is None or not str(kwargs["data_inicio"]).strip()):
         del kwargs["data_inicio"]
+    # ETE_FASEADA AUSENTE VIRA True, e esta e a UNICA excecao a regra do docstring.
+    #
+    # A regra existe para o job e o caminho Excel resolverem o mesmo problema. Aqui ela
+    # produzia o contrario: o backend nao mandava a chave (a regra dele era "quem afirma e
+    # o executor"), o `dev/worker.py` afirmava `True` e este job nao afirmava nada — entao
+    # o MESMO pedido rodava faseado no executor local e nao-faseado em producao. E o
+    # caminho Excel passa `True` explicito, de modo que o default False do `ler_banco` e
+    # quem divergia de todos.
+    #
+    # Sem o modo a ETE nao vira obra construivel, nunca fica pronta, e o motor recusa a
+    # receita de TODA sub-bacia do sistema: na uA1, 142 sub-bacias faturando e
+    # R$ 744.050.138,78 de receita com `True` contra ZERO e R$ 0,00 com `False`.
+    #
+    # Desde 29/09/2026 o backend AFIRMA a chave no pedido (`parametros.ETE_FASEADA_SEMPRE`),
+    # e este default cobre so os pedidos gravados ANTES disso — todos rodaram faseado, e um
+    # retry deles nao pode rodar outro problema.
+    kwargs.setdefault("ete_faseada", True)
     return kwargs
 
 
