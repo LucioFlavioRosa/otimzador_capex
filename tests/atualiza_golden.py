@@ -5,7 +5,22 @@ em test_regressao_golden.py. Use APENAS quando a mudanca de resultado for intenc
 
 Revise o diff antes de colar — e justamente essa revisao que garante que nenhuma regressao passe
 despercebida."""
-from _helpers import load_cts, build_all, capex_total, cobertura_fim
+from datetime import date
+
+from _helpers import load_cts, build_all, capex_total, cobertura_fim, engine
+
+#: O MESMO "HOJE" DO `conftest.py` (`HOJE_DOS_TESTES`), e sem isto o gerador mentia.
+#:
+#: Sem `data_inicio` no cadastro, o motor deriva o inicio das obras do primeiro ano de
+#: CAPEX e do DIA DA RODADA. O `conftest` fixa `hoje()` em 2025-01-01 para o cronograma
+#: cair em janeiro do primeiro ano; este script rodava com a data real, media outro
+#: cronograma e imprimia um VPL R$ 387.450,00 diferente do que os testes comparam.
+#:
+#: Quem seguisse a instrucao do docstring colava um golden que falhava na hora — e podia
+#: concluir que a mudanca dele quebrou mais coisa do que quebrou. Achado em 28/09/2026,
+#: ao atualizar o golden pela exclusao do efeito-base.
+HOJE_DOS_TESTES = date(2025, 1, 1)
+engine().hoje = lambda: HOJE_DOS_TESTES
 
 
 def medir(usar_cts):

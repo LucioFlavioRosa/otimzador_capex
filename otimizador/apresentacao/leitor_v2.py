@@ -138,7 +138,10 @@ def ebitda(T, cidade=None, salvar=None):
                                   efeito_base=("efeito_base", "sum"),
                                   opex=("opex_rateado", "sum"),
                                   ebitda=("ebitda", "sum")).reset_index().sort_values("ano")
-        an["receita_total"] = an.receita_direta + an.receita_indireta + an.efeito_base
+        # SEM `efeito_base`: a receita do plano e so a de ligacao nova (28/09/2026), e
+        # somar o efeito aqui o reintroduzia no EBITDA e na margem deste leitor depois de
+        # ele ter saido de todo o resto.
+        an["receita_total"] = an.receita_direta + an.receita_indireta
         an["ebitda_margem_pct"] = an.apply(
             lambda r: (r.ebitda / r.receita_total * 100.0) if r.receita_total else None, axis=1)
         titulo = f"EBITDA por ano — {cidade}  (receita operacional - OPEX)"

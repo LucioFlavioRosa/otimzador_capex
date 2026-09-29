@@ -550,8 +550,21 @@ def avaliar(cen,plano):
     for o in cen.coletas:
         if not elig.get(o.id): continue
         vpl+=_pv_receita(cen,o,inicio[o.id],_fatc.get(cen.cidade_da(o)))
-    # ---- EFEITO-BASE: reajuste da equivalencia sobre as ligacoes JA EXISTENTES ----
-    _vbase=_pv_efeito_base(cen,_fatc); vpl+=_vbase
+    # ---- EFEITO-BASE: CALCULADO E FORA DA CONTA (28/09/2026) ----
+    # Decisao do dono do produto: so entra na receita o que vem de LIGACAO NOVA. O
+    # efeito-base e o reajuste da equivalencia sobre as ligacoes JA EXISTENTES — receita
+    # que apareceria sem o plano, e creditar isso ao investimento inflava o numero que
+    # decide onde investir (numa unidade, 22,1 Mi de um VPL de 156,9 Mi: 14%).
+    #
+    # NAO E SO RELATORIO. `vpl` alimenta `vpl_obj`, e o CP-SAT ranqueia os planos
+    # candidatos por ele (`resolver_por_sistema` chama `avaliar` na geracao de colunas) e
+    # ainda maximiza `vpl` puro no desempate lexicografico. Tirar daqui muda O PLANO
+    # ESCOLHIDO, e e essa a intencao — um plano deixa de valer mais por cruzar faixa de
+    # paridade em cima de quem ja era atendido.
+    #
+    # CONTINUA SENDO CALCULADO, e sai em `efeito_base_ano` para quem quiser ver o que
+    # ficou de fora. O que nao acontece mais e somar.
+    _vbase=_pv_efeito_base(cen,_fatc)
     receita_ano=[0.0]*anos                                # receita nominal por ano (p/ graficos/fluxo de caixa)
     for o in cen.coletas:
         if not elig.get(o.id): continue
@@ -644,8 +657,10 @@ def avaliar(cen,plano):
     # ---- EBITDA (saida calculada, NAO entra na funcao objetivo) ----
     # EBITDA de curto prazo = receita operacional - OPEX, ano a ano, em valores NOMINAIS.
     # Receita operacional = receita das ligacoes novas + efeito-base da paridade (reajuste na base).
+    # O EFEITO-BASE SAI DO EBITDA pela mesma razao que saiu do VPL: ele nao e receita do
+    # plano. Fica no retorno, em `efeito_base_ano`, para quem quiser ver o excluido.
     efeito_base_ano=_efeito_base_por_ano(cen,_fatc,anos)
-    ebitda_ano=[receita_ano[_y]+efeito_base_ano[_y]-opex_ano[_y] for _y in range(anos)]
+    ebitda_ano=[receita_ano[_y]-opex_ano[_y] for _y in range(anos)]
     return {"vpl":vpl,"vpl_obj":vpl_obj,"capex_ano":capex_ano,"opex_ano":opex_ano,"receita_ano":receita_ano,
             "efeito_base_ano":efeito_base_ano,"ebitda_ano":ebitda_ano,"cobertura":cob,
             "cobertura_sistema":cob_sis,"deficit_cobertura":deficit,"metas_nao_atingidas":metas_nao,"metas_detalhe":metas_det,
@@ -729,7 +744,9 @@ def vpl_por_subbacia(cen,res):
             fr0=f0.get(cid,1.0)
             for Y in range(min(len(fe),cen.horizonte(o))):
                 out[sb]["efeito_base"]+=base_ano*(fe[Y]-fr0)/(1.0+tx)**Y
-    for sb,d in out.items(): d["vpl"]=d["capex"]+d["opex"]+d["rec_dir"]+d["rec_ind"]+d["efeito_base"]
+    # SEM `efeito_base` NA SOMA, como em `avaliar`: a parcela continua na saida para ser
+    # vista, e nao entra no VPL da sub-bacia.
+    for sb,d in out.items(): d["vpl"]=d["capex"]+d["opex"]+d["rec_dir"]+d["rec_ind"]
     return out
 
 def auditar_orcamento(cen,res):
