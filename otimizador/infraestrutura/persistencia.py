@@ -696,7 +696,13 @@ def _serie_subbacia_ano(cen, res, rid, req_sb):
         for Y in range(anos):
             if not (rec_d[sb][Y] or rec_i[sb][Y] or cap[sb][Y] or ope[sb][Y] or efb[sb][Y]):
                 continue                                  # nao grava ano vazio
-            rop = rec_d[sb][Y] + rec_i[sb][Y] + efb[sb][Y]     # receita operacional
+            # RECEITA OPERACIONAL SEM O EFEITO-BASE (28/09/2026). Ele fica na coluna
+            # `efeito_base` ao lado, informativo, e nao entra no EBITDA — pela mesma razao
+            # que saiu do VPL: nao e receita do plano. Sem isto a coluna `ebitda` desta
+            # tabela ficava R$ 67.716.132,01 acima do EBITDA da rodada (achado pela revisao
+            # do Codex, que viu o backend se protegendo por recalculo enquanto a coluna
+            # gravada seguia errada).
+            rop = rec_d[sb][Y] + rec_i[sb][Y]                  # receita operacional
             lin.append({"run_id": rid, "sub_bacia": sb, "cidade": n.cidade,
                         "sistema": n.sistema, "ano": ab + Y,
                         "receita_direta": rec_d[sb][Y], "receita_indireta": rec_i[sb][Y],

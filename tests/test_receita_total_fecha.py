@@ -35,6 +35,13 @@ def tabelas():
     return silent(P.materializar, cen, build_all(cen), run_id="run_receita", banco="pg")
 
 
+@pytest.fixture(scope="module")
+def resultado_do_plano():
+    """O `avaliar` do mesmo plano da fixture `tabelas` — para comparar o publicado com o
+    calculado sem depender de o teste refazer a materialização."""
+    return build_all(load_cts(True))      # o MESMO plano da fixture `tabelas`
+
+
 def test_o_total_do_kpi_e_a_soma_da_serie_anual(tabelas):
     meta = tabelas["run_meta"].iloc[0]
     assert meta["receita_total"] == pytest.approx(tabelas["run_ano"]["receita_total"].sum())
@@ -57,18 +64,51 @@ def test_O_TOTAL_E_SO_AS_LIGACOES_NOVAS(tabelas):
     assert meta["receita_total"] < novas + efeito, "o efeito-base voltou para o total"
 
 
-def test_O_VPL_PUBLICADO_NAO_TEM_EFEITO_BASE_A_SUBTRAIR(tabelas):
+def test_A_COLUNA_QUE_O_BACKEND_SUBTRAI_E_ZERO(tabelas):
     """`vp_efeito_base` publicado é ZERO, e isso é o contrato com o backend.
 
     A coluna quer dizer "quanto do `vpl` ao lado é efeito-base", e é por isso que o
     backend a subtrai para mostrar o VPL do produto. Como o motor não soma mais o efeito
     ao `vpl`, a parcela a subtrair é zero — publicar o valor calculado faria o backend
     descontar duas vezes, e o VPL na tela ficaria menor que o real.
+
+    O NOME DIZ SÓ O QUE O TESTE PROVA. A versão anterior se chamava "o VPL publicado não
+    tem efeito-base a subtrair", e isso ele não verificava: prometia uma afirmação sobre o
+    `vpl` e checava duas colunas. Quem prova a outra metade é o teste seguinte.
     """
     meta = tabelas["run_meta"].iloc[0]
     assert meta["vp_efeito_base"] == 0.0
     sb = tabelas["run_subbacia"]
     assert (sb["vp_efeito_base"] == 0.0).all()
+
+
+def test_O_VPL_PUBLICADO_E_O_VPL_QUE_O_MOTOR_CALCULOU(tabelas, resultado_do_plano):
+    """A outra metade: o `vpl` publicado é o de `avaliar`, e ele não tem o efeito dentro.
+
+    Sem isto, a dupla de testes acima provaria só que duas colunas são zero — e uma
+    persistência que somasse o efeito de volta ao publicar passaria.
+    """
+    meta = tabelas["run_meta"].iloc[0]
+    res = resultado_do_plano
+    assert res["vp_efeito_base"] > 0, "a fixture tem de ter efeito-base, senão nada é provado"
+    assert meta["vpl"] == pytest.approx(res["vpl"])
+    # E é MENOR que seria com o efeito somado — a conta que reconcilia o golden.
+    assert meta["vpl"] < res["vpl"] + res["vp_efeito_base"]
+
+
+def test_O_EBITDA_POR_SUBBACIA_E_ANO_TAMBEM_EXCLUI_O_EFEITO(tabelas):
+    """A coluna `ebitda` de `run_subbacia_ano` seguia somando o efeito-base.
+
+    Achado pela revisão do Codex em 29/09/2026: o backend se protegia recalculando
+    (`receita_direta + receita_indireta - opex_rateado`), então a tela estava certa, mas a
+    coluna gravada ficava R$ 67.716.132,01 acima numa rodada real — e o leitor offline,
+    que soma a coluna, reintroduzia o efeito depois de ele ter saído de todo o resto.
+    """
+    sa = tabelas["run_subbacia_ano"]
+    assert not sa.empty
+    assert sa["efeito_base"].sum() > 0, "a fixture tem de ter efeito-base"
+    esperado = sa["receita_direta"] + sa["receita_indireta"] - sa["opex_rateado"]
+    assert sa["ebitda"].tolist() == pytest.approx(esperado.tolist())
 
 
 def test_o_ebitda_total_fecha_com_a_soma_anual(tabelas):
