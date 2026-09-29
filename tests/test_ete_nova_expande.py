@@ -343,3 +343,51 @@ def test_o_plano_do_solver_cabe_no_orcamento_que_ele_recebeu():
     res = silent(CP.resolver_por_sistema, cen, max_time_s=30, workers=4)
     aud = silent(M.avaliar, cen, res["plano"]).get("auditoria_orcamento") or {}
     assert aud.get("ok", True), f"plano acima do teto: {aud.get('violacoes')}"
+
+
+# ------------------------------------------------ a linha da ETE no resultado
+#
+# Relatado pelo dono do produto em 28/09/2026: a ETE era o único elemento do plano que
+# saía sem quantidade e sem preço unitário — não dava para conferir de onde vinha o
+# CAPEX dela nem quantos módulos foram construídos.
+def _obra(cen, sufixo):
+    return next(o for o in cen.obras.values() if str(o.id).endswith(sufixo))
+
+
+def test_o_pacote_diz_quantos_modulos_e_a_que_preco():
+    cen = _cen(_abas(modulos=3), ete_faseada=True)
+    mo = _obra(cen, "#nova")
+    assert mo.quantidade == 3
+    assert mo.unidade == "modulo"
+    assert mo.preco_unitario == pytest.approx(CAPEX_MOD)
+
+
+def test_o_capex_do_pacote_separa_terreno_dos_modulos():
+    """`quantidade x preco` NÃO é o CAPEX do pacote: falta o terreno. As duas parcelas
+    saem em entradas próprias do `capex_comp`, para quem exibe somar a diferença como o
+    que ela é, e não como um erro de arredondamento."""
+    cen = _cen(_abas(modulos=3), ete_faseada=True)
+    comp = _obra(cen, "#nova").capex_comp
+    assert comp["ETE nova: 3 modulo(s)"] == pytest.approx(3 * CAPEX_MOD)
+    assert comp["ETE nova: terreno"] == pytest.approx(TERRENO)
+    assert sum(comp.values()) == pytest.approx(TERRENO + 3 * CAPEX_MOD)
+
+
+def test_o_modulo_de_expansao_fecha_a_conta_sozinho():
+    """Sem terreno: um módulo, ao preço de um módulo."""
+    cen = _cen(_abas(modulos=1), ete_faseada=True)
+    mx = _obra(cen, "#x1")
+    assert mx.quantidade == 1 and mx.unidade == "modulo"
+    assert mx.quantidade * mx.preco_unitario == pytest.approx(mx.capex)
+
+
+def test_no_modo_modular_a_ETE_tambem_diz_quantos_modulos():
+    """Lá ela é UMA obra com `n_mod` módulos, e o número acompanha o plano."""
+    M = engine()
+    cen = _cen(_abas(modulos=1))
+    silent(M.viavel, cen, _plano_tudo(cen))
+    e = _ete(cen)
+    assert e.quantidade == e.n_mod == 2
+    assert e.preco_unitario == pytest.approx(CAPEX_MOD)
+    # terreno + 2 módulos: a diferença para `quantidade x preco` é o terreno
+    assert e.capex - e.quantidade * e.preco_unitario == pytest.approx(TERRENO)
