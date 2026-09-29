@@ -127,3 +127,68 @@ def test_A_PARIDADE_SEGUE_A_REGUA_E_ISSO_PODE_MEXER_NA_RECEITA(com_cts, sem_cts_
         assert all(b <= a + 1e-9 for a, b in zip(fa[cid], fb[cid])), (
             f"{cid}: tirar a CTS da cobertura MELHOROU a paridade, o que é impossível"
         )
+
+
+# ----------------------------------------------------------------- paridade uniforme
+#: A MESMA FIXTURE, com UM degrau de paridade só.
+#:
+#: Pedido do dono do produto em 29/09/2026: provar o botão com a paridade neutralizada,
+#: para o efeito dele ficar isolado. Com um degrau só, o fator é o mesmo em qualquer
+#: cobertura — então o único canal que ligaria a cobertura ao dinheiro está fechado, e o
+#: que sobrar de diferença no VPL é defeito, não consequência.
+#:
+#: Um DEGRAU, e não a aba vazia: sem `fator-esgoto` o motor cai no ramo `if not fx` e
+#: devolve 1.0 sem olhar faixa nenhuma. O caminho que roda em produção é o das faixas, e é
+#: ele que o teste tem de exercitar.
+def _uniforme(abas):
+    abas["fator-esgoto"] = [
+        {"cidade_id": c["cidade_id"], "cidade_name": c.get("cidade_name"),
+         "cobertura_pct": 0, "paridade": 1}
+        for c in {l["cidade_id"]: l for l in abas["fator-esgoto"]}.values()
+    ]
+    return abas
+
+
+def _cen_uniforme(cts_na_cobertura):
+    return silent(engine().ler_banco, _uniforme(banco(BANK_CTS)), orcamento=ORC_SLACK,
+                  usar_cts=True, cts_na_cobertura=cts_na_cobertura)
+
+
+@pytest.fixture(scope="module")
+def par_uniforme():
+    a, b = _cen_uniforme(True), _cen_uniforme(False)
+    return a, build_all(a), b, build_all(b)
+
+
+def test_com_paridade_uniforme_o_FATOR_nao_se_mexe(par_uniforme):
+    """A premissa do cenário, conferida antes de qualquer conclusão sair dele."""
+    _, ra, _, rb = par_uniforme
+    assert ra["fator_esgoto_ano"] == rb["fator_esgoto_ano"]
+    assert all(all(f == 1.0 for f in fs) for fs in ra["fator_esgoto_ano"].values())
+
+
+def test_com_paridade_uniforme_O_VPL_NAO_MUDA(par_uniforme):
+    """O que o dono do produto pediu para provar: só a cobertura muda.
+
+    Fechado o canal da paridade, ligar ou desligar a CTS da cobertura não pode mexer em
+    NENHUM número de dinheiro — o coletor continua faturando igual, e a obra dele continua
+    custando o mesmo.
+    """
+    ca, ra, cb, rb = par_uniforme
+    assert rb["vpl"] == pytest.approx(ra["vpl"])
+    assert sum(rb["receita_ano"]) == pytest.approx(sum(ra["receita_ano"]))
+    assert rb["opex_ano"] == ra["opex_ano"]
+    reg = list(ca.regionais)[0]
+    assert rb["capex_ano"][reg] == ra["capex_ano"][reg]
+    assert sum(rb["efeito_base_ano"]) == pytest.approx(sum(ra["efeito_base_ano"]))
+
+
+def test_com_paridade_uniforme_A_COBERTURA_MUDA_pelo_tanto_exato(par_uniforme):
+    """E muda pelo que tinha de mudar: as ligações de cobertura da CTS, nada mais."""
+    ca, ra, _, rb = par_uniforme
+    cob_a = sum(v[-1] for v in ra["cobertura_sistema"].values())
+    cob_b = sum(v[-1] for v in rb["cobertura_sistema"].values())
+    da_cts = sum(o.lig_cob for o in ca.coletas
+                 if o.no in ca.cts_ids and ra["elig"].get(o.id))
+    assert da_cts > 0, "a fixture precisa de CTS faturando"
+    assert cob_a - cob_b == pytest.approx(da_cts, rel=1e-9)
