@@ -255,8 +255,13 @@ def painel_geral(cen, res, salvar=None):
     dec = _eng().vpl_por_subbacia(cen, res)
     T = {k: sum(d[k] for d in dec.values())
          for k in ("capex", "opex", "rec_dir", "rec_ind", "efeito_base")}
+    # O EFEITO-BASE SAI DA ACUMULACAO (28/09/2026). Ele nao entra mais no VPL, e
+    # somar uma parcela que o total nao tem faria a barra final mostrar
+    # VPL + efeito-base — um numero que nao existe em lugar nenhum. Ele continua
+    # aparecendo, A PARTE e depois do VPL, porque saber QUANTO ficou de fora e o que
+    # permite discutir a decisao.
     passos = [("Receita\ndireta", T["rec_dir"]), ("Receita\nindireta", T["rec_ind"]),
-              ("Efeito-base\nparidade", T["efeito_base"]), ("CAPEX", T["capex"]),
+              ("CAPEX", T["capex"]),
               ("OPEX", T["opex"])]
     base = 0.0
     for i, (lab, val) in enumerate(passos):
@@ -268,8 +273,14 @@ def painel_geral(cen, res, salvar=None):
     a.bar(len(passos), base / 1e6, color=INK)
     a.text(len(passos), base / 2e6, f"{base/1e6:,.0f}", ha="center", va="center",
            fontsize=9, color="white", weight="bold")
-    a.set_xticks(range(len(passos) + 1))
-    a.set_xticklabels([p[0] for p in passos] + ["VPL"], fontsize=8)
+    a.set_xticks(range(len(passos) + 2))
+    # A barra do EXCLUIDO, fora da acumulacao e em cinza, para nao ser lida como
+    # parcela do total.
+    _eb = T["efeito_base"]
+    a.bar(len(passos) + 1, _eb / 1e6, color=GREY, alpha=.7)
+    a.text(len(passos) + 1, _eb / 2e6, f"{_eb/1e6:+,.0f}", ha="center", va="center",
+           fontsize=8, color="white", weight="bold")
+    a.set_xticklabels([p[0] for p in passos] + ["VPL", "Efeito-base\n(FORA)"], fontsize=8)
     a.axhline(0, color=GREY, lw=1)
     a.set_ylabel("R$ milhoes (valor presente)"); a.grid(alpha=.2, axis="y")
     a.set_title("Cascata do VPL — de onde vem, para onde vai", weight="bold")
@@ -976,13 +987,16 @@ def deep_dive_subbacia(cen, res, sb, grafico=True):
     print("  DECOMPOSICAO DO VPL (valor presente, com rateio por vazao):")
     itens = [("Receita direta", d.get("rec_dir", 0.0)),
              ("Receita indireta (ligacao)", d.get("rec_ind", 0.0)),
-             ("Efeito-base da paridade", d.get("efeito_base", 0.0)),
              ("CAPEX rateado", d.get("capex", 0.0)),
              ("OPEX rateado", d.get("opex", 0.0))]
     for lab, v in itens:
         print(f"    {lab:<28} {_brl(v):>20}")
     print(f"    {'-' * 48}")
     print(f"    {'VPL da sub-bacia':<28} {_brl(d.get('vpl', 0.0)):>20}")
+    # O EFEITO-BASE VEM DEPOIS DO TOTAL, marcado como fora: esta lista e somada a
+    # olho por quem confere, e uma linha no meio que o total nao inclui faz a conta
+    # nao fechar.
+    print(f"    {'Efeito-base (FORA do VPL)':<28} {_brl(d.get('efeito_base', 0.0)):>20}")
     print()
     print("  OBRAS QUE ESTA SUB-BACIA EXIGE (e a fatia que ela paga):")
     if col:
