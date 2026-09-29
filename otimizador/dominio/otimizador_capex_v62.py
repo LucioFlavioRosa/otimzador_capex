@@ -1459,6 +1459,16 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                 # tarifa recorrente da cidade inteira. Ou seja A RECEITA MUDA por essa via,
                 # ainda que a receita das ligacoes novas da CTS nao mude. Ele decidiu isso
                 # sabendo, para o produto ter UMA cobertura realizada em vez de duas.
+                # `_cts_ids_all` (a aba inteira) e nao `cen.cts_ids` (as desta unidade) por
+                # ordem: `cts_ids` so e montado bem mais abaixo, quando `cen.nos` existe.
+                # E e equivalente aqui, por dois motivos conferidos: `cts_ids` e por
+                # definicao subconjunto de `_cts_ids_all` (`set(_cts_op) & set(cen.nos)`), e
+                # este laco ja filtrou `if sb not in sis_de_sb: continue`, entao o que sobra
+                # da diferenca sao ids que nem viram no. Medido no cadastro real: na uB2,
+                # 186 coletas zeradas para 186 nos de CTS da unidade, nenhuma a mais; na
+                # uA1, que nao tem CTS na topologia, nenhuma. Apontado pela revisao do
+                # Codex como predicado mais largo que o necessario — e e, mas estreita-lo
+                # exigiria adiantar a montagem de `cts_ids`, que depende de `cen.nos`.
                 _cob_do_no=0.0 if (sb in _cts_ids_all and not cts_na_cobertura) else lig_cob
                 kw.update(ligacoes=lig_cob,ligacoes_cobertura=_cob_do_no,ticket_mes=_ticket_der,
                           preco_ligacao=num(so.get("preco_por_ligacao")),arrec_dir=adir,arrec_ind=aind,lag=lag,maturacao=mat)
