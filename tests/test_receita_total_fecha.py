@@ -82,18 +82,31 @@ def test_A_COLUNA_QUE_O_BACKEND_SUBTRAI_E_ZERO(tabelas):
     assert (sb["vp_efeito_base"] == 0.0).all()
 
 
-def test_O_VPL_PUBLICADO_E_O_VPL_QUE_O_MOTOR_CALCULOU(tabelas, resultado_do_plano):
-    """A outra metade: o `vpl` publicado é o de `avaliar`, e ele não tem o efeito dentro.
+def test_O_VPL_PUBLICADO_NAO_CONTEM_O_EFEITO(tabelas, resultado_do_plano):
+    """O `vpl` publicado é a soma das QUATRO parcelas — sem a do efeito-base.
 
-    Sem isto, a dupla de testes acima provaria só que duas colunas são zero — e uma
-    persistência que somasse o efeito de volta ao publicar passaria.
+    A primeira versão deste teste comparava o publicado com `res["vpl"]` e afirmava que
+    ele era menor que `res["vpl"] + efeito`. As duas coisas eram verdade no código ANTIGO
+    também (lá o publicado também era igual ao calculado; o problema é que os dois
+    incluíam o efeito), então ele não distinguia regra nova de velha — a segunda revisão
+    do Codex apontou. Comparar com a DECOMPOSIÇÃO é o que distingue: ela é a única forma
+    de dizer "o total não tem esta parcela".
     """
     meta = tabelas["run_meta"].iloc[0]
     res = resultado_do_plano
     assert res["vp_efeito_base"] > 0, "a fixture tem de ter efeito-base, senão nada é provado"
+
+    dec = engine().vpl_por_subbacia(load_cts(True), res)
+    T = {k: sum(d[k] for d in dec.values())
+         for k in ("capex", "opex", "rec_dir", "rec_ind", "efeito_base")}
+    quatro = T["rec_dir"] + T["rec_ind"] + T["capex"] + T["opex"]
+
+    assert meta["vpl"] == pytest.approx(quatro), "o publicado não é a soma das quatro"
     assert meta["vpl"] == pytest.approx(res["vpl"])
-    # E é MENOR que seria com o efeito somado — a conta que reconcilia o golden.
-    assert meta["vpl"] < res["vpl"] + res["vp_efeito_base"]
+    # E a prova de que a regra é a NOVA: somar a quinta parcela dá outro número, e é esse
+    # que o código antigo publicava.
+    assert meta["vpl"] != pytest.approx(quatro + T["efeito_base"])
+    assert T["efeito_base"] == pytest.approx(res["vp_efeito_base"])
 
 
 def test_O_EBITDA_POR_SUBBACIA_E_ANO_TAMBEM_EXCLUI_O_EFEITO(tabelas):

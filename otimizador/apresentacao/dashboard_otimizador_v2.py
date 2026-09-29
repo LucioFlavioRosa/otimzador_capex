@@ -1019,12 +1019,25 @@ def deep_dive_subbacia(cen, res, sb, grafico=True):
     fig.suptitle(f"Sub-bacia {sb} — {no.cidade}", fontsize=13, weight="bold")
     a = ax[0]
     base = 0.0
-    labs = ["Rec.\ndireta", "Rec.\nindireta", "Efeito\nbase", "CAPEX", "OPEX"]
+    # OS ROTULOS SAEM DOS PROPRIOS `itens`, e nao de uma lista paralela escrita a
+    # mao. Eram cinco rotulos para cinco itens; ao tirar o efeito-base da acumulacao
+    # (28/09/2026) os itens caIram para quatro e os rotulos ficaram em cinco, e
+    # `set_xticklabels` passou a receber mais rotulo que tick — o grafico levantava
+    # erro. Derivando, as duas listas nao podem mais divergir. Achado pela segunda
+    # revisao do Codex.
+    labs = [lab.replace("Receita ", "Rec.\n").replace(" rateado", "")
+            for lab, _ in itens]
     for i, (lab, v) in enumerate(itens):
         a.bar(i, v / 1e6, bottom=base / 1e6, color=(TEAL if v >= 0 else RED))
         base += v
     a.bar(len(itens), base / 1e6, color=INK)
-    a.set_xticks(range(len(itens) + 1)); a.set_xticklabels(labs + ["VPL"], fontsize=8)
+    # E O EFEITO-BASE A PARTE, depois do VPL e em cinza, como na cascata do painel:
+    # ele nao entra no VPL, e somar uma parcela que o total nao tem faria a barra
+    # final mostrar um numero que nao existe em lugar nenhum.
+    _eb = d.get("efeito_base", 0.0)
+    a.bar(len(itens) + 1, _eb / 1e6, color=GREY, alpha=.7)
+    a.set_xticks(range(len(itens) + 2))
+    a.set_xticklabels(labs + ["VPL", "Efeito-base\n(FORA)"], fontsize=8)
     a.axhline(0, color=GREY, lw=1); a.grid(alpha=.2, axis="y")
     a.set_ylabel("R$ milhoes"); a.set_title("Cascata do VPL da sub-bacia", weight="bold")
 

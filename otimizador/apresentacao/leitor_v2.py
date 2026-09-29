@@ -260,10 +260,14 @@ def painel_geral(T, salvar=None):
     a.grid(alpha=.2)
 
     a = ax[1, 0]
+    # O EFEITO-BASE FICA FORA DA ACUMULACAO (28/09/2026). So conta receita de ligacao
+    # nova. Em rodada NOVA a coluna vem zerada e isto nao muda nada; em rodada ANTIGA
+    # ela vem preenchida, e somar a barra reconstruia o VPL BRUTO — diferente do que o
+    # produto mostra. A barra continua, A PARTE, para se ver quanto ficou de fora.
     passos = [("Receita\ndireta", sb.vp_receita_direta.sum()),
               ("Receita\nindireta", sb.vp_receita_indireta.sum()),
-              ("Efeito-base\nparidade", sb.vp_efeito_base.sum()),
               ("CAPEX", sb.vp_capex_rateado.sum()), ("OPEX", sb.vp_opex_rateado.sum())]
+    _eb = sb.vp_efeito_base.sum()
     base = 0.0
     for i, (lab, v) in enumerate(passos):
         a.bar(i, v / 1e6, bottom=base / 1e6, color=(TEAL if v >= 0 else RED))
@@ -273,7 +277,9 @@ def painel_geral(T, salvar=None):
     a.bar(len(passos), base / 1e6, color=INK)
     a.text(len(passos), base / 2e6, f"{base/1e6:,.0f}", ha="center", va="center",
            fontsize=9, color="white", weight="bold")
-    a.set_xticks(range(len(passos) + 1)); a.set_xticklabels([p[0] for p in passos] + ["VPL"], fontsize=8)
+    a.bar(len(passos) + 1, _eb / 1e6, color=GREY, alpha=.7)
+    a.set_xticks(range(len(passos) + 2))
+    a.set_xticklabels([p[0] for p in passos] + ["VPL", "Efeito-base\n(FORA)"], fontsize=8)
     a.axhline(0, color=GREY, lw=1); a.grid(alpha=.2, axis="y")
     a.set_ylabel("R$ milhoes (VP)")
     a.set_title("Cascata do VPL  (run_subbacia)", weight="bold")
@@ -576,9 +582,13 @@ def deep_dive(T, sub_bacia, salvar=None):
         print(f"sub-bacia '{sub_bacia}' nao encontrada.")
         return
     r = linha.iloc[0]
+    # O EFEITO-BASE FICA FORA DA ACUMULACAO (28/09/2026). So conta receita de ligacao
+    # nova. Em rodada NOVA a coluna vem zerada e isto nao muda nada; em rodada ANTIGA
+    # ela vem preenchida, e somar a barra reconstruia o VPL BRUTO — diferente do que o
+    # produto mostra. A barra continua, A PARTE, para se ver quanto ficou de fora.
     itens = [("Rec.\ndireta", r["vp_receita_direta"]), ("Rec.\nindireta", r["vp_receita_indireta"]),
-             ("Efeito\nbase", r["vp_efeito_base"]), ("CAPEX", r["vp_capex_rateado"]),
-             ("OPEX", r["vp_opex_rateado"])]
+             ("CAPEX", r["vp_capex_rateado"]), ("OPEX", r["vp_opex_rateado"])]
+    _eb = r["vp_efeito_base"]
     fig, ax = plt.subplots(1, 2, figsize=(14, 4.6))
     fig.suptitle(f"Sub-bacia {sub_bacia} — {r['cidade']}   (das tabelas)",
                  fontsize=13, weight="bold")
@@ -586,8 +596,9 @@ def deep_dive(T, sub_bacia, salvar=None):
     for i, (lab, v) in enumerate(itens):
         a.bar(i, v / 1e6, bottom=base / 1e6, color=(TEAL if v >= 0 else RED)); base += v
     a.bar(len(itens), base / 1e6, color=INK)
-    a.set_xticks(range(len(itens) + 1))
-    a.set_xticklabels([i[0] for i in itens] + ["VPL"], fontsize=8)
+    a.bar(len(itens) + 1, _eb / 1e6, color=GREY, alpha=.7)
+    a.set_xticks(range(len(itens) + 2))
+    a.set_xticklabels([i[0] for i in itens] + ["VPL", "Efeito\nbase (FORA)"], fontsize=8)
     a.axhline(0, color=GREY, lw=1); a.grid(alpha=.2, axis="y"); a.set_ylabel("R$ milhoes")
     a.set_title("Cascata do VPL  (run_subbacia)", weight="bold")
     a = ax[1]
@@ -1030,13 +1041,19 @@ def cobertura_cidade(T, cidade, salvar=None):
     # ---------------- direita: CAPEX, OPEX, receitas e VPL ----------------
     a = ax[1]
     c = sb[sb.cidade == cidade]
+    # O EFEITO-BASE FICA FORA DA ACUMULACAO (28/09/2026). So conta receita de ligacao
+    # nova. Em rodada NOVA a coluna vem zerada e isto nao muda nada; em rodada ANTIGA
+    # ela vem preenchida, e somar a barra reconstruia o VPL BRUTO — diferente do que o
+    # produto mostra. A barra continua, A PARTE, para se ver quanto ficou de fora.
     itens = [("Receita\ndireta", c.vp_receita_direta.sum(), TEAL),
              ("Receita\nindireta", c.vp_receita_indireta.sum(), "#2DD4BF"),
-             ("Efeito-base\nparidade", c.vp_efeito_base.sum(), "#5EEAD4"),
              ("CAPEX", c.vp_capex_rateado.sum(), RED),
              ("OPEX", c.vp_opex_rateado.sum(), ORANGE)]
+    # AQUI O VPL ERA A SOMA DOS ITENS, entao tirar a parcela ja corrige o total — era
+    # exatamente este o defeito: o efeito entrava no numero chamado VPL.
     vpl = sum(v for _, v, _ in itens)
     itens.append(("VPL", vpl, INK))
+    itens.append(("Efeito-base\n(FORA)", c.vp_efeito_base.sum(), GREY))
     xs = range(len(itens))
     a.bar(xs, [v / 1e6 for _, v, _ in itens], color=[c3 for _, _, c3 in itens])
     for i, (lab, v, _) in enumerate(itens):
