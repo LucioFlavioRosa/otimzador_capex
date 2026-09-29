@@ -27,10 +27,40 @@ def test_todo_kwarg_do_mapa_existe_no_ler_banco():
 def test_chave_ausente_nao_vira_default_do_job():
     """A regressao mais cara da revisao: o job tinha ete_faseada=True (motor: False) e
     foco_cobertura=1.0 (motor: None). foco_cobertura=1.0 satura o peso de cobertura, ou
-    seja, uma run_request sem essa chave rodava 'so cobertura' em vez de 'so VPL'."""
+    seja, uma run_request sem essa chave rodava 'so cobertura' em vez de 'so VPL'.
+
+    A REGRA CONTINUA, com UMA excecao nomeada: `ete_faseada`. Ver o teste seguinte."""
     kw = J._params_para_ler_banco({"ORCAMENTO": 1000.0})
-    assert kw == {"orcamento": 1000.0}, "o job nao pode inventar default proprio"
-    assert "ete_faseada" not in kw and "foco_cobertura" not in kw
+    assert kw == {"orcamento": 1000.0, "ete_faseada": True}, (
+        "o job nao pode inventar default proprio — exceto `ete_faseada`, ver abaixo"
+    )
+    assert "foco_cobertura" not in kw
+    #: E a excecao e UMA. Qualquer outra chave do mapa continua ausente quando o pedido
+    #: nao a manda — e e isso que impede a regressao antiga de voltar por outra porta.
+    inventadas = set(kw) - {"orcamento", "ete_faseada"}
+    assert not inventadas, f"o job passou a inventar default para {sorted(inventadas)}"
+
+
+def test_ETE_FASEADA_AUSENTE_VIRA_TRUE_e_por_que():
+    """A unica excecao a regra de cima, e ela existe porque a regra a violava.
+
+    O default do `ler_banco` e False, e sem o modo a ETE nao vira obra construivel, nunca
+    fica pronta, e o motor recusa a receita de TODA sub-bacia do sistema — na uA1, 142
+    sub-bacias faturando e R$ 744.050.138,78 de receita com True contra ZERO e R$ 0,00 com
+    False (medido em 29/09/2026).
+
+    Enquanto o job nao afirmava nada, o MESMO pedido rodava faseado no `dev/worker.py` (que
+    afirmava) e nao-faseado aqui. O caminho Excel tambem passa True explicito, de modo que o
+    default False era quem divergia de todos — a regra "o job nao inventa default" existe
+    para o job e o Excel resolverem o MESMO problema, e aqui ela produzia o contrario.
+
+    Desde 29/09/2026 o backend AFIRMA `ETE_FASEADA` no pedido, entao este default cobre so
+    os pedidos gravados ANTES disso. Um retry deles nao pode rodar outro problema.
+    """
+    assert J._params_para_ler_banco({"ORCAMENTO": 1.0})["ete_faseada"] is True
+    #: E o pedido MANDA quando manda: o default nao atropela escolha explicita, senao
+    #: comparar os dois modos deixaria de ser possivel para sempre.
+    assert J._params_para_ler_banco({"ORCAMENTO": 1.0, "ETE_FASEADA": False})["ete_faseada"] is False
 
 
 def test_chave_desconhecida_e_erro():
@@ -41,7 +71,9 @@ def test_chave_desconhecida_e_erro():
 
 def test_chaves_do_job_nao_viram_kwarg_do_motor():
     kw = J._params_para_ler_banco({"ORCAMENTO": 1.0, "USUARIO": "x", "MAX_TIME_S": 60})
-    assert set(kw) == {"orcamento"}
+    #: `ete_faseada` entra por default (ver acima); `USUARIO` e `MAX_TIME_S` ficam com o
+    #: job e nao viram kwarg do motor, que e o que este teste guarda.
+    assert set(kw) == {"orcamento", "ete_faseada"}
 
 
 def test_traduz_todas_as_chaves_conhecidas():
