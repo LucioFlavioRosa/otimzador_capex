@@ -339,9 +339,41 @@ def _montar_faseado(sub, built, shift_meses=0):
     for sis,mm in getattr(sub,"modulos_sis",{}).items():
         e=sub.ete_do_sistema.get(sis)
         tot=sum(sub.vazao.get(sb,0.0) for sb in built if sub.nos[sb].sistema==sis)
-        need=int(math.ceil(max(0.0,tot-e.folga)/e.cap_modulo)) if (e and e.cap_modulo>0) else (1 if (e and tot>e.folga) else 0)
-        for k,mo in enumerate(mm):
-            pl[mo.id]=(mo.inicio_min+shift_meses) if k<need else None
+        # A CONTA E DE CAPACIDADE, E NAO DE CABECAS DE MODULO (29/09/2026).
+        #
+        # `mm` na ETE nova comeca pelo PACOTE, que vale `modulos` modulos, e segue com as
+        # expansoes, que podem ter capacidade PROPRIA. Dividir a demanda por `cap_modulo` e
+        # contar obras subestimava o pacote e superestimava cada expansao: com o modulo de
+        # expansao MENOR que o inicial, o plano saia desta funcao sem capacidade para a
+        # vazao conectada, `viavel()` cortava as sub-bacias do sistema e a coluna candidata
+        # entrava no mestre valendo menos receita do que deveria — sem erro nenhum.
+        #
+        # Somando a capacidade de cada modulo na ordem em que `mm` os traz (pacote antes da
+        # expansao, que e a precedencia fisica), o resultado e o mesmo de antes onde os
+        # modulos sao iguais, e passa a ser correto onde nao sao.
+        falta=max(0.0,tot-e.folga) if e else 0.0
+        # "Capacidade nao declarada" e propriedade da ETE, e nao de cada modulo: um PACOTE
+        # de zero modulos tem capacidade zero de verdade, e nao pode contar como se
+        # resolvesse a demanda so porque o numero dele e zero.
+        _sem_cap=bool(e) and not (float(getattr(e,"cap_modulo",0.0) or 0.0)>0)
+        # E A EXPANSAO SO PODE COMECAR COM O PACOTE PRONTO — a mesma regra que `viavel()`
+        # cobra, e que esta funcao ignorava.
+        #
+        # Consequencia, achada em 29/09/2026: `_colunas_faseada` descarta em silencio toda
+        # coluna que `viavel()` recusa (`if not M.viavel(...): continue`). Com a expansao
+        # agendada junto com o pacote, TODA ETE nova que precisasse expandir tinha todas as
+        # suas colunas recusadas, e do sistema sobrava apenas a coluna "nao constroi nada" —
+        # as sub-bacias dele nunca entravam no plano, sem erro nenhum aparecer.
+        _pac=next((m for m in mm if getattr(m,"e_pacote",False)),None)
+        for mo in mm:
+            if falta<=1e-9: pl[mo.id]=None; continue
+            pl[mo.id]=mo.inicio_min+shift_meses
+            if getattr(mo,"depende_do_pacote",False) and _pac is not None:
+                _yp=pl.get(_pac.id)
+                if _yp is None: pl[mo.id]=None; continue      # sem pacote nao ha expansao
+                pl[mo.id]=max(pl[mo.id],_yp+_pac.prazo)
+            if _sem_cap: falta=0.0; continue     # capacidade nao declarada: um modulo resolve
+            falta-=float(getattr(mo,"cap_modulo",0.0) or 0.0)
     return pl
 
 def _plano_sistema_faseado(sub):
