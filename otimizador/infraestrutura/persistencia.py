@@ -543,7 +543,18 @@ def _tabela_sistema(cen, res, rid):
         # modulo construido", e `capacidade_instalada` (e o `modulos_construidos x
         # capacidade_modulo` que o backend soma para a tela) sairia 3x menor.
         _nm = lambda ms: sum(int(getattr(m, "n_modulos", 1) or 0) for m in ms)
-        cap_inst = folga + _nm(constr) * capmod
+        # A CAPACIDADE INSTALADA SOMA A CAPACIDADE DE CADA MODULO CONSTRUIDO, e nao conta
+        # modulos vezes a capacidade do INICIAL (29/09/2026, achado na revisao do Codex).
+        #
+        # Cada obra-modulo carrega a capacidade DELA: o pacote vale `modulos x cap_modulo` e
+        # cada expansao vale a capacidade do modulo de expansao, que a ETE nova pode ter
+        # PROPRIA. Contar cabecas vezes a capacidade inicial publicava, num pacote de 150
+        # com expansao de 60, capacidade 300 onde ha 210 — ocupacao de 60% no lugar de
+        # 85,7%, e folga de 120 onde sobram 30. Gargalo de tratamento aparecendo como sobra.
+        #
+        # Onde os modulos sao iguais as duas contas dao o mesmo numero, e por isso nenhuma
+        # rodada ja publicada muda.
+        cap_inst = folga + sum(float(getattr(m, "cap_modulo", 0.0) or 0.0) for m in constr)
         lin.append({
             "run_id": rid, "sistema": sis, "cidade": cid,
             "horizonte_anos": int(cen.hz.get(sis, cen.anos)),

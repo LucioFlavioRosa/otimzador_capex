@@ -27,8 +27,10 @@ def _coefs(cen):
             for m in range(y,min(y+pe,Hm)): v+=cm/(1+tx)**(m//12)
         elif y<Hm: v+=o.capex/(1+tx)**(y//12)
         return v
-    def modulo_pv(e,y):
-        tx=cen.taxa_de(e);Hm=cen.horizonte(e)*12;pe=e.prazo;cap=e.capex_modulo;v=0.0
+    def modulo_pv(e,y,preco=None):
+        """Valor presente de UM modulo. `preco` para o de expansao, que pode ter o dele."""
+        tx=cen.taxa_de(e);Hm=cen.horizonte(e)*12;pe=e.prazo;v=0.0
+        cap=e.capex_modulo if preco is None else preco
         if pe>0:
             cm=cap/pe
             for m in range(y,min(y+pe,Hm)): v+=cm/(1+tx)**(m//12)
@@ -106,20 +108,49 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
     # de tamanho fixo, com um teto duro de vazao; agora expande por demanda como a que ja
     # existe, e a unica diferenca e o PISO: se a ETE e construida, ela nasce com pelo menos
     # os `modulos` do cadastro — o pacote projetado, indivisivel.
-    nmod={};zmod={}
+    # O MODULO DE EXPANSAO PODE TER CAPACIDADE E PRECO PROPRIOS (29/09/2026), e por isso a
+    # ETE NOVA tem DUAS contagens aqui.
+    #
+    # Com uma variavel so — `nmod` modulos, todos ao `cap_modulo` e ao `capex_modulo` do
+    # inicial — o modelo mentia nos dois sentidos. Medido: modulo inicial de 150 e expansao
+    # de 10, 180 de vazao, orcamento de 4.000.000 por ano. O solver dizia OTIMO comprando 2
+    # modulos (300 de capacidade, 1.000.000), enquanto a regra real cobra 1 + teto(30/10) =
+    # 4 modulos e 2.300.000 — e `viavel()` recusava o plano por estouro de orcamento.
+    #
+    # `nmod` continua sendo o TOTAL (e o que o OPEX por modulo multiplica, que nao distingue
+    # os tipos); `nexp` e a parte que responde a demanda, ao preco e a capacidade dela.
+    nmod={};zmod={};nexp={};zexp={}
     for e in etes:
         if EF: continue
         cap=e.cap_modulo or 1e-9
-        _piso=int(getattr(e,"modulos",0) or 0) if getattr(e,"nova",False) else 0
-        Nmax=max(_piso,int(math.ceil(sum(cen.vazao.get(sb,0.0) for sb in sis_sb.get(e.sistema,[]))/cap)))+1
+        _nova=bool(getattr(e,"nova",False))
+        _piso=int(getattr(e,"modulos",0) or 0) if _nova else 0
+        _capx,_px=M.modulo_de_expansao(e)      # A UNICA leitura da regra, como no resto
+        _capx=_capx or 1e-9
+        _dem=sum(cen.vazao.get(sb,0.0) for sb in sis_sb.get(e.sistema,[]))
+        # O TETO de cada variavel tem de caber a demanda pelo divisor DELA: dimensionado
+        # pelo modulo inicial, um modulo de expansao menor nao alcancaria a vazao e o
+        # modelo ficaria inviavel — ou deixaria sub-bacia de fora — por limite artificial.
+        _xmax=int(math.ceil(max(0.0,_dem-_piso*cap)/_capx))+1 if _nova else 0
+        Nmax=max(_piso+_xmax,int(math.ceil(_dem/cap)))+1
         nmod[e.id]=md.NewIntVar(0,Nmax,f"nmod_{e.id}")
         md.Add(nmod[e.id]<=Nmax*built[e.id]); md.Add(nmod[e.id]>=built[e.id])
-        if _piso: md.Add(nmod[e.id]>=_piso*built[e.id])
-        zmod[e.id]={}
+        nexp[e.id]=md.NewIntVar(0,_xmax,f"nexp_{e.id}")
+        if _nova:
+            md.Add(nexp[e.id]<=_xmax*built[e.id])
+            # O pacote e PISO e e indivisivel: construida a ETE, ela nasce com `modulos`
+            # modulos iniciais, e todo modulo alem deles e expansao.
+            md.Add(nmod[e.id]==_piso*built[e.id]+nexp[e.id])
+        else:
+            md.Add(nexp[e.id]==0)
+        zmod[e.id]={};zexp[e.id]={}
         for t in perm[e.id]:
             z=md.NewIntVar(0,Nmax,f"z_{e.id}_{t}")
             md.Add(z==nmod[e.id]).OnlyEnforceIf(x[e.id][t]); md.Add(z==0).OnlyEnforceIf(x[e.id][t].Not())
             zmod[e.id][t]=z
+            zx=md.NewIntVar(0,max(0,_xmax),f"zx_{e.id}_{t}")
+            md.Add(zx==nexp[e.id]).OnlyEnforceIf(x[e.id][t]); md.Add(zx==0).OnlyEnforceIf(x[e.id][t].Not())
+            zexp[e.id][t]=zx
 
     # ---- conectividade (AND dos componentes do caminho) — so no modo modular ----
     conect={}
@@ -138,7 +169,22 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
         # MESMA RESTRICAO PARA AS DUAS: a capacidade construida cobre a demanda conectada.
         # Era `dem <= modulos*cap` na ETE nova — teto duro que o solver nao podia comprar,
         # e por isso ele simplesmente deixava sub-bacias fora do plano.
-        md.Add(nmod[e.id]*int(round(e.cap_modulo*VZ)) >= dem - int(round(e.folga*VZ)))
+        #
+        # E cada PARCELA entra com a capacidade dela: o pacote com a do modulo inicial, a
+        # expansao com a do modulo de expansao. Com uma capacidade so, um modulo de expansao
+        # menor era contado como se fosse do tamanho do inicial.
+        _falta=dem - int(round(e.folga*VZ))
+        if getattr(e,"nova",False):
+            # `modulos` iniciais (piso indivisivel, que so existe se a ETE for construida)
+            # + os de expansao, cada parcela com a capacidade do SEU tipo. Vale tambem para
+            # `modulos=0`, e ai a capacidade inteira vem da expansao — as 69 ETEs novas sem
+            # modulos no cadastro de 09/2026.
+            _capx,_ = M.modulo_de_expansao(e)
+            _pac=int(getattr(e,"modulos",0) or 0)
+            md.Add(_pac*int(round(e.cap_modulo*VZ))*built[e.id]
+                   + nexp[e.id]*int(round(_capx*VZ)) >= _falta)
+        else:
+            md.Add(nmod[e.id]*int(round(e.cap_modulo*VZ)) >= _falta)
         if getattr(e,"nova",False):
             # greenfield: sem estacao nao ha para onde mandar, nem com folga
             for sb in sis_sb.get(e.sistema,[]): md.Add(built[e.id]>=conect[sb])
@@ -210,7 +256,13 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
                     # DUAS PARCELAS: o TERRENO e do pacote e se paga uma vez (segue `x`); os
                     # MODULOS seguem `zmod`, que e quantos o solver escolheu — o pacote e o
                     # piso dele. Antes o CAPEX era o pacote fixo, e a expansao nao existia.
-                    ter=e.capex_terreno; cmt=ter/pe if pe>0 else 0
+                    # O PACOTE E UMA PARCELA SO: terreno + os `modulos` iniciais, que sao
+                    # indivisiveis e seguem `x` (paga-se uma vez, se a ETE for construida).
+                    # A EXPANSAO segue `zexp`, ao preco DELA — antes tudo ia por `zmod` ao
+                    # preco do modulo inicial, o que subcusteava a expansao mais cara e
+                    # sobrecusteava a mais barata.
+                    ter=e.capex_terreno+int(getattr(e,"modulos",0) or 0)*e.capex_modulo
+                    cmt=ter/pe if pe>0 else 0
                     for t in perm[e.id]:
                         val=0.0
                         if pe>0:
@@ -218,14 +270,15 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
                                 if m//12==Y: val+=cmt
                         elif t//12==Y: val=ter
                         if val>0: vs.append(x[e.id][t]); cs.append(R(val))
-                    cm=e.capex_modulo/pe if pe>0 else 0
+                    _px=M.modulo_de_expansao(e)[1]
+                    cm=_px/pe if pe>0 else 0
                     for t in perm[e.id]:
                         val=0.0
                         if pe>0:
                             for m in range(t,t+pe):
                                 if m//12==Y: val+=cm
-                        elif t//12==Y: val=e.capex_modulo
-                        if val>0: vs.append(zmod[e.id][t]); cs.append(R(val))
+                        elif t//12==Y: val=_px
+                        if val>0: vs.append(zexp[e.id][t]); cs.append(R(val))
                 else:
                     cm=e.capex_modulo/pe if pe>0 else 0
                     for t in perm[e.id]:
@@ -248,10 +301,13 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
         if EF:
             for t in perm[e.id]: addterm(x[e.id][t],-R(pv_lump(e,e.capex_fixo,t)))
         elif getattr(e,"nova",False):
-            # terreno (uma vez, com a obra) + modulos (quantos o solver comprar)
+            # O PACOTE (terreno + os `modulos` iniciais, indivisiveis) uma vez, com a obra;
+            # + a expansao, quantos o solver comprar, ao preco DELA.
+            _pac=e.capex_terreno+int(getattr(e,"modulos",0) or 0)*e.capex_modulo
+            _px=M.modulo_de_expansao(e)[1]
             for t in perm[e.id]:
-                addterm(x[e.id][t],-R(pv_lump(e,e.capex_terreno,t)))
-                addterm(zmod[e.id][t],-R(modulo_pv(e,t)))
+                addterm(x[e.id][t],-R(pv_lump(e,_pac,t)))
+                addterm(zexp[e.id][t],-R(modulo_pv(e,t,_px)))
         else:
             for t in perm[e.id]: addterm(zmod[e.id][t],-R(modulo_pv(e,t)))
     for c in coletas:

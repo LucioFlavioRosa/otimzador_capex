@@ -371,3 +371,84 @@ def test_o_plano_do_solver_cabe_no_orcamento_COM_DOIS_PRECOS():
     res = silent(CP.resolver_por_sistema, cen, max_time_s=30, workers=4)
     aud = silent(M.avaliar, cen, res["plano"]).get("auditoria_orcamento") or {}
     assert aud.get("ok", True), f"plano acima do teto: {aud.get('violacoes')}"
+
+# ------------------------------------------------ o que a REVISÃO do Codex achou
+#
+# Dois consumidores que ficaram com a premissa de módulos iguais. Nenhum dos dois era
+# alcançado pelos testes acima, e é por isso que eles estão aqui, nomeados pelo efeito.
+def test_a_CAPACIDADE_PUBLICADA_soma_a_de_cada_modulo():
+    """`otim_sistema.capacidade_instalada` é o que a tela mostra como capacidade da ETE,
+    e dela saem `ocupacao_pct` e `folga_remanescente`.
+
+    A conta era `folga + modulos_construidos × capacidade_por_modulo` — o número de
+    módulos FÍSICOS vezes a capacidade do módulo INICIAL. Com pacote de 150 e expansão de
+    60, ela publicava 300 de capacidade onde há 210: ocupação 60% no lugar de 85,7%, e
+    folga de 120 onde sobram 30. Um gargalo de tratamento aparecendo como sobra.
+    """
+    pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.infraestrutura import persistencia as P
+    M = engine()
+    D.set_engine(M); P.set_engine(M, D)
+    cen = _cen_exp(modulos=1, ete_faseada=True)
+    plano = _plano(cen)
+    plano[_obra(cen, "#x1").id] = _obra(cen, "#nova").prazo
+    res = silent(M.avaliar, cen, plano)
+    tabs = silent(P.materializar, cen, res, run_id="run_exp", banco="pg")
+    linha = tabs["run_sistema"].set_index("sistema").loc[_ete(cen).sistema]
+    assert linha["modulos_construidos"] == 2, "um módulo inicial e um de expansão"
+    assert linha["capacidade_instalada"] == pytest.approx(CAP_MOD + CAP_EXP)
+    assert linha["ocupacao_pct"] == pytest.approx(VAZAO_S1 / (CAP_MOD + CAP_EXP) * 100.0)
+    assert linha["folga_remanescente"] == pytest.approx(CAP_MOD + CAP_EXP - VAZAO_S1)
+
+
+def test_a_capacidade_publicada_NAO_muda_com_modulos_iguais():
+    """O guarda do teste acima: onde os módulos são iguais, a soma das capacidades dá
+    exatamente o que a multiplicação dava. Nenhuma rodada publicada muda de número."""
+    pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.infraestrutura import persistencia as P
+    M = engine()
+    D.set_engine(M); P.set_engine(M, D)
+    cen = _cen(_abas(modulos=2), ete_faseada=True)
+    tabs = silent(P.materializar, cen, silent(M.avaliar, cen, _plano(cen)),
+                  run_id="run_igual", banco="pg")
+    linha = tabs["run_sistema"].set_index("sistema").loc[_ete(cen).sistema]
+    assert linha["capacidade_instalada"] == pytest.approx(
+        linha["modulos_construidos"] * linha["capacidade_modulo"] + linha["folga_inicial"])
+
+
+def test_o_CPSAT_DIRETO_nao_devolve_plano_acima_do_orcamento():
+    """O cenário do Codex, com o módulo de expansão MENOR e ao MESMO preço do inicial.
+
+    O modelo do CP-SAT direto tinha uma capacidade e um preço só (`nmod × cap_modulo >=
+    demanda`, custo `nmod × capex_modulo`). Com expansão de 10 para 150 de módulo inicial,
+    ele achava que a ETE custava 2 módulos onde a regra real cobra 4 — e devolvia OTIMO
+    com um plano que `viavel()` recusa por orçamento.
+    """
+    from _helpers import solver_or_skip
+    CP = solver_or_skip()
+    M = engine()
+    orc = {2026: 4_000_000, 2027: 4_000_000, 2028: 0, 2029: 0}
+    cen = _cen(_abas(modulos=1, capacidade_por_modulo_expansao=10.0,
+                     capex_por_modulo_expansao=CAPEX_MOD), orcamento=orc)
+    res = silent(CP.resolver_cpsat, cen, max_time_s=30, workers=4)
+    ok, motivo = silent(M.viavel, cen, res["plano"])
+    assert ok, f"o solver devolveu plano que a regra recusa: {motivo}"
+
+
+def test_o_CPSAT_DIRETO_compra_a_QUANTIDADE_certa_de_expansao():
+    """E a capacidade que ele modela é a de cada tipo: 180 de vazão com pacote de 150 e
+    expansão de 10 pede TRÊS módulos de expansão, não um."""
+    from _helpers import ORC_SLACK, solver_or_skip
+    CP = solver_or_skip()
+    M = engine()
+    cen = _cen(_abas(modulos=1, capacidade_por_modulo_expansao=10.0,
+                     capex_por_modulo_expansao=20000.0), orcamento=ORC_SLACK)
+    res = silent(CP.resolver_cpsat, cen, max_time_s=30, workers=4)
+    sis = _ete(cen).sistema
+    coletas = [o for o in cen.coletas if cen.nos[o.no].sistema == sis]
+    feitas = [o for o in coletas if res["plano"].get(o.id) is not None]
+    assert len(feitas) == len(coletas), "deixou sub-bacia de fora em vez de comprar módulo"
+    silent(M.viavel, cen, res["plano"])
+    assert _ete(cen).n_mod == 1 + 3, f"n_mod={_ete(cen).n_mod}"
