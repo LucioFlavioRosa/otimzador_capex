@@ -114,9 +114,29 @@ def _onde_estourou(tb, quadros=3):
     nao depende disso: o que nao e gravado nao vaza.
     """
     import os
-    pilha = traceback.extract_tb(tb)[-quadros:]
+    #: O QUADRO MAIS PROFUNDO COSTUMA SER BIBLIOTECA, e nao codigo nosso. Num `INSERT` que
+    #: falha, a pilha termina dentro do driver — medido: `extras.py:1299 em execute_values`
+    #: como primeiro quadro, e `publicacao.py:262 em publicar_postgres` atras. O primeiro
+    #: nome nao ajuda quem vai abrir um arquivo do motor.
+    #:
+    #: Entao os quadros de biblioteca saem, e o que sobra sao os nossos. Se NENHUM for
+    #: nosso — falha inteiramente dentro de dependencia —, valem os ultimos, porque um
+    #: nome de biblioteca ainda e melhor do que nada.
+    #: OS CAMINHOS QUE O PROPRIO PYTHON DECLARA, e nao um palpite de substring: a
+    #: biblioteca padrao mora em `Lib/` (nao em `site-packages`), e procurar por
+    #: "/lib/python" nao pega `Lib/json/decoder.py` no Windows.
+    import sysconfig
+    _libs = tuple(os.path.abspath(c).replace("\\", "/").lower() for c in
+                  {sysconfig.get_paths().get(k) for k in ("stdlib", "platstdlib",
+                                                          "purelib", "platlib")} if c)
+
+    def _nosso(q):
+        c = os.path.abspath(q.filename).replace("\\", "/").lower()
+        return not c.startswith(_libs)
+    pilha = traceback.extract_tb(tb)
+    escolhidos = [q for q in pilha if _nosso(q)] or list(pilha)
     return " <- ".join(f"{os.path.basename(q.filename)}:{q.lineno} em {q.name}"
-                       for q in reversed(pilha))
+                       for q in reversed(escolhidos[-quadros:]))
 
 
 def _exigir_teto_anual(cen):

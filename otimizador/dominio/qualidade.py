@@ -180,8 +180,17 @@ def checar(cen, res, tabs, tol: float = TOL):
     # essa a unica trilha que sobra.
     sem_col = list((res or {}).get("cidades_sem_coluna_viavel") or [])
     add("Colunas candidatas: toda cidade com obra tinha opcao", not sem_col,
-        (f"{len(sem_col)} cidade(s) sem coluna que construa algo: {sem_col[:8]}"
-         + (" ..." if len(sem_col) > 8 else "")) if sem_col else "ok",
+        (res or {}).get("aviso_colunas") or "ok", nivel="aviso")
+    #: E O DESCARTE, sempre — inclusive nas cidades que ENTRARAM no plano. Cidade que
+    #: perdeu 90% das colunas candidatas entra com menos opcao do que devia, e isso nao
+    #: aparece em lugar nenhum. A linha sai mesmo quando passa, porque o numero em si e a
+    #: informacao: e a base de comparacao da proxima rodada.
+    _rec = int((res or {}).get("colunas_recusadas") or 0)
+    _diag = (res or {}).get("diag_colunas") or {}
+    _test = sum(int(d.get("testadas") or 0) for d in _diag.values())
+    add("Colunas candidatas: quantas foram recusadas", True,
+        (f"{_rec} de {_test} recusadas em {len(_diag)} cidade(s)" if _test
+         else "sem diagnostico (rodada nao faseada ou solver nao usado)"),
         nivel="aviso")
 
     criticos = [r for r in rel if r["nivel"] == "critico"]

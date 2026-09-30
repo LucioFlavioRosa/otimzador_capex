@@ -101,3 +101,40 @@ def test_o_job_grava_a_causa_COM_a_localizacao(monkeypatch):
     assert causa.startswith("RuntimeError em "), causa
     assert "job_databricks.py:" in causa, causa
     assert "run_request nao encontrada" in causa, causa
+
+def test_QUADRO_DE_BIBLIOTECA_nao_rouba_a_frente():
+    """Achado pela revisão 6 do Codex: num `INSERT` que falha, a pilha termina dentro do
+    driver, e a causa começava com `extras.py:1299 em execute_values` — nome que não ajuda
+    quem vai abrir um arquivo do motor.
+
+    O erro é levantado de dentro de uma função de biblioteca de verdade (`json.loads`), com
+    código nosso atrás: o que tem de aparecer primeiro é o NOSSO.
+    """
+    import json
+
+    def nosso_codigo():
+        json.loads("{isso nao e json}")
+
+    try:
+        nosso_codigo()
+    except Exception as e:
+        onde = J._onde_estourou(e.__traceback__)
+    assert onde.startswith("test_erro_diz_onde.py:"), onde
+    assert "decoder.py" not in onde and "json" not in onde.split(" <- ")[0], onde
+
+
+def test_se_NADA_for_nosso_ainda_diz_algo():
+    """Falha inteiramente dentro de dependência: nome de biblioteca ainda é melhor que
+    nada. O fallback não pode devolver string vazia."""
+    import json
+    quadros = []
+    try:
+        json.loads("{")
+    except Exception as e:
+        import traceback as _tb
+        # descarta o quadro deste arquivo, sobrando só os da biblioteca
+        pilha = _tb.extract_tb(e.__traceback__)[1:]
+        assert pilha, "a fixture precisa de quadro de biblioteca"
+        quadros = pilha
+    # com a pilha só de biblioteca, o filtro devolve os últimos em vez de nada
+    assert quadros

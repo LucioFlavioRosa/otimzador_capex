@@ -18,7 +18,41 @@ em `controle.run_diagnostico`.
 import pytest
 
 from _helpers import engine, silent, solver_or_skip
-from test_ete_nova_expande import _abas, _cen
+from test_ete_nova_expande import _abas, _cen, _plano_tudo
+
+#: O construtor ATUAL, guardado antes de qualquer troca nos testes.
+_NOVA = None
+
+
+def _guardar_atual():
+    global _NOVA
+    if _NOVA is None:
+        _NOVA = solver_or_skip()._montar_faseado
+    return _NOVA
+
+
+#: O CONSTRUTOR DE PLANOS ANTERIOR A 29/09/2026 — o de `3f9d558^`, palavra por palavra.
+#:
+#: Ele agendava a expansão no mesmo mês do pacote, e a precedência recusa. É com ele que a
+#: recusa de coluna acontece de verdade, e é dele que sai o MOTIVO que o aviso carrega.
+def _montar_faseado_antigo(sub, built, shift_meses=0):
+    import math
+    pl = {oid: None for oid in sub.obras}
+    for oid, o in sub.obras.items():
+        if o.no in built and o.eh_aegea() and o.tipo != "ete_mod":
+            _py = getattr(o, "_obrig_planyear", None)
+            if _py is not None:
+                pl[oid] = min(max(int(o.inicio_min), (_py - 1) * 12), _py * 12 - 1)
+            else:
+                pl[oid] = o.inicio_min + shift_meses
+    for sis, mm in getattr(sub, "modulos_sis", {}).items():
+        e = sub.ete_do_sistema.get(sis)
+        tot = sum(sub.vazao.get(sb, 0.0) for sb in built if sub.nos[sb].sistema == sis)
+        need = (int(math.ceil(max(0.0, tot - e.folga) / e.cap_modulo))
+                if (e and e.cap_modulo > 0) else (1 if (e and tot > e.folga) else 0))
+        for k, mo in enumerate(mm):
+            pl[mo.id] = (mo.inicio_min + shift_meses) if k < need else None
+    return pl
 
 
 #: A CIDADE QUE FICA SEM OPÇÃO, forçada no gerador de colunas.
@@ -121,3 +155,87 @@ def test_o_aviso_NAO_bloqueia_a_publicacao(cenario_sem_coluna):
     ok, rel, _ = Q.checar(cen, res, tabs)
     criticos_falhos = [l for l in rel if l["nivel"] == "critico" and not l["ok"]]
     assert not any(l["check"].startswith("Colunas candidatas") for l in criticos_falhos)
+
+
+# ------------------------------------------ o MOTIVO do descarte (revisão 6 do Codex)
+#
+# Ele confirmou que o aviso por cidade não pega falha PARCIAL: cidade que perdeu quase
+# todas as colunas, mas guardou uma minúscula, sai da lista. E a saída óbvia — olhar por
+# sistema, em vez de por cidade — tem um problema pior: "nenhuma coluna constrói este
+# sistema" também acontece quando o sistema não valia a pena, e tratar economia como falha
+# seria ruído.
+#
+# O que distingue os dois é o MOTIVO, e ele só existe onde a recusa acontece. Então o
+# diagnóstico passou a ser contado dentro de `_colunas_faseada`: quantas colunas foram
+# testadas, quantas recusadas, por quê, e quantas ficaram fora da janela de CAPEX.
+def test_o_diagnostico_conta_o_que_foi_TESTADO_e_ACEITO(cenario_sem_coluna):
+    CP = solver_or_skip()
+    cen, alvo = cenario_sem_coluna
+    res = silent(CP.resolver_por_sistema, cen, max_time_s=20, workers=2)
+    diag = res.get("diag_colunas") or {}
+    assert diag, "o diagnóstico tem de existir em rodada faseada"
+    d = diag[alvo]
+    assert d["testadas"] > 0, d
+    assert d["testadas"] >= d["aceitas"] + d["recusadas"] + d["repetidas"], d
+    assert "sub_bacias_no_conjunto" in d
+
+
+def test_o_AVISO_diz_o_MOTIVO_e_nao_so_o_fato():
+    """Aviso que diz "algo deu errado" deixa a investigação inteira para quem lê.
+
+    Com o construtor anterior a 29/09, a recusa é a precedência da expansão — e é esse
+    texto que tem de chegar a quem opera, com a contagem.
+    """
+    from _helpers import ORC_SLACK
+    CP = solver_or_skip()
+    cen = _cen(_abas(modulos=1), ete_faseada=True, orcamento=ORC_SLACK)
+    _guardar_atual()
+    CP._montar_faseado = _montar_faseado_antigo
+    try:
+        res = silent(CP.resolver_por_sistema, cen, max_time_s=20, workers=2)
+    finally:
+        CP._montar_faseado = _NOVA
+    recusadas = res.get("colunas_recusadas") or 0
+    assert recusadas > 0, "o construtor antigo tem de ter coluna recusada"
+    motivos = {m for d in res["diag_colunas"].values() for m in d["motivos"]}
+    assert any("antes de a ETE nova ficar pronta" in m for m in motivos), motivos
+
+
+def test_o_PORTAO_publica_a_contagem_mesmo_quando_PASSA():
+    """O número em si é a informação: ele é a base de comparação da próxima rodada, e é o
+    que mostra cidade que entrou no plano com menos opção do que devia."""
+    pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.dominio import qualidade as Q
+    from otimizador.infraestrutura import persistencia as P
+    from _helpers import ORC_SLACK
+    CP = solver_or_skip()
+    M = engine()
+    D.set_engine(M); P.set_engine(M, D)
+    cen = _cen(_abas(modulos=1), ete_faseada=True, orcamento=ORC_SLACK)
+    res = silent(CP.resolver_por_sistema, cen, max_time_s=20, workers=2)
+    tabs = silent(P.materializar, cen, silent(M.avaliar, cen, res["plano"]),
+                  run_id="run_diag", banco="pg")
+    _ok, rel, _ = Q.checar(cen, res, tabs)
+    linha = next(l for l in rel if l["check"].startswith("Colunas candidatas: quantas"))
+    assert linha["nivel"] == "aviso" and linha["ok"], "é informação, não reprovação"
+    assert "recusadas em" in linha["detalhe"], linha["detalhe"]
+
+
+def test_rodada_NAO_faseada_nao_finge_diagnostico():
+    """Sem o caminho faseado não há geração de colunas, e inventar contagem zero pareceria
+    "nada foi recusado" onde o certo é "não se mediu"."""
+    pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.dominio import qualidade as Q
+    from otimizador.infraestrutura import persistencia as P
+    M = engine()
+    D.set_engine(M); P.set_engine(M, D)
+    cen = _cen(_abas(modulos=1))
+    #: o `res` COMPLETO da avaliação, e não um dicionário de mentira: o portão lê VPL,
+    #: cobertura e o resto dele, e um `res` recortado testaria outra coisa.
+    res = silent(M.avaliar, cen, _plano_tudo(cen))
+    tabs = silent(P.materializar, cen, res, run_id="run_sem_diag", banco="pg")
+    _ok, rel, _ = Q.checar(cen, res, tabs)
+    linha = next(l for l in rel if l["check"].startswith("Colunas candidatas: quantas"))
+    assert "sem diagnostico" in linha["detalhe"], linha["detalhe"]

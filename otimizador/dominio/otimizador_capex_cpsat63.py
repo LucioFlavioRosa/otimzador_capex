@@ -14,6 +14,7 @@ Interface identica a do MILP: resolver_cpsat(cen, ...) e resolver_cpsat_por_regi
 Rode no Colab:  pip install ortools
 """
 import math
+import re as _re
 from otimizador.dominio import otimizador_capex_v62 as M   # unica linha alterada na reorganizacao
 def _orck(cen):   # v26: sem financiamento -> sempre o CAPEX cheio entra na restricao de orcamento
     return "capex_ano"
@@ -460,14 +461,51 @@ def _colunas_faseada(cen,sis,sub,reg,anos,ac):
     for _,sb in marg:                                            # subconjuntos decrescentes (flexibilidade de orcamento)
         cur=cur-{sb}
         if cur: subsets.append(set(cur))
+    # ---- O DESCARTE DE COLUNA PASSA A SER CONTADO ----
+    #
+    # As duas linhas abaixo (`break` por horizonte e `continue` por `viavel()`) sao o ponto
+    # cego mais caro deste solver: coluna recusada nao da erro, ela deixa de existir. Foi
+    # assim que cidades inteiras da uB2 sairam de qualquer plano — e o resultado apareceu
+    # na tela como decisao economica normal.
+    #
+    # CONTAR O DESCARTE, e nao inferir da cobertura: "nenhuma coluna constroi este sistema"
+    # tambem acontece quando o sistema nao valia a pena, e tratar economia como falha seria
+    # ruido. O que distingue os dois e o MOTIVO — e ele so existe aqui, onde a recusa
+    # acontece. Por isso o diagnostico nasce neste laco e viaja no `cen`, como
+    # `_obrig_desconsideradas` ja faz.
+    #
+    # `sis` e o nome do parametro, mas o recorte e a CIDADE (ver `_sub_cenario_cidade`).
+    _d = {"testadas": 0, "aceitas": 0, "recusadas": 0, "fora_da_janela": 0,
+          "repetidas": 0, "motivos": {}}
     for bs in subsets:
         for d in range(ac):
             pl=_montar_faseado(sub,bs,d*12)
-            if any(v is not None and v>=ac*12 for v in pl.values()): break
-            if not M.viavel(sub,pl)[0]: continue
+            _d["testadas"]+=1
+            if any(v is not None and v>=ac*12 for v in pl.values()):
+                _d["fora_da_janela"]+=1; break
+            _ok,_motivo=M.viavel(sub,pl)
+            if not _ok:
+                _d["recusadas"]+=1
+                #: O QUE INTERESSA E O PADRAO, e o motivo vem com id de obra e numero de
+                #: mes dentro. Sem normalizar, "expansao comeca no mes 9 ... (mes 26)" e
+                #: "... mes 21 ... (mes 38)" viram duas linhas de 26 em vez de uma de 52, e
+                #: o histograma deixa de mostrar qual regra recusou mais.
+                #:
+                #: O exemplo guarda o texto inteiro, com id e mes, para quem for investigar.
+                _chave=str(_motivo).split(": ",1)[-1] if ": " in str(_motivo) else str(_motivo)
+                _chave=_re.sub(r"\d+","N",_chave)
+                _chave=_re.sub(r"\w*_\w+","<obra>",_chave)
+                _m=_d["motivos"].setdefault(_chave,{"n":0,"exemplo":str(_motivo)})
+                _m["n"]+=1
+                continue
             r=M.avaliar(sub,pl); key=round(r["vpl_obj"])
-            if key in seen: continue
-            seen.add(key); cols.append((r["vpl_obj"],list(r[_orck(cen)][reg]),dict(pl),r["vpl"],r["metas_nao_atingidas"],_cov(r)))
+            if key in seen:
+                _d["repetidas"]+=1; continue
+            seen.add(key); _d["aceitas"]+=1
+            cols.append((r["vpl_obj"],list(r[_orck(cen)][reg]),dict(pl),r["vpl"],r["metas_nao_atingidas"],_cov(r)))
+    if not hasattr(cen,"_diag_colunas"): cen._diag_colunas={}
+    _d["sub_bacias_no_conjunto"]=len(built)
+    cen._diag_colunas[sis]=_d
     return cols
 
 def _sub_cenario_cidade(cen, cid):
@@ -608,10 +646,39 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
         if _o.eh_aegea(): _tem_obra_aegea[cen.cidade_da(_o)]=True
     sem_coluna=sorted(g for g in grupos if _tem_obra_aegea.get(g)
                       and not any(any(v is not None for v in c[2].values()) for c in cols[g]))
+    #: O MOTIVO, que e o que responde "por que esta cidade nao tem obra?". Sem ele o aviso
+    #: diz que algo deu errado e deixa a investigacao inteira para quem le. Ele vem de
+    #: `_colunas_faseada`, que conta o descarte no lugar onde ele acontece.
+    _diag=getattr(cen,"_diag_colunas",{}) or {}
+    def _porque(g):
+        d=_diag.get(g) or {}
+        if not d: return "sem diagnostico"
+        if d.get("recusadas"):
+            pior=max(d["motivos"].items(), key=lambda kv: kv[1]["n"], default=(None,None))
+            if pior[0]: return f"{d['recusadas']} de {d['testadas']} recusadas — {pior[0]}"
+        if d.get("fora_da_janela"): return f"{d['fora_da_janela']} fora da janela de CAPEX"
+        if not d.get("sub_bacias_no_conjunto"):
+            return "nenhuma sub-bacia entrou no conjunto inicial (decisao economica)"
+        return f"{d['testadas']} testadas, nenhuma aceita"
     if sem_coluna and verbose:
         print(f"  [aviso] {len(sem_coluna)} cidade(s) sem NENHUMA coluna candidata que "
-              f"construa algo — elas nao podem entrar no plano: {sem_coluna[:8]}"
-              + (" ..." if len(sem_coluna) > 8 else ""))
+              f"construa algo — elas nao podem entrar no plano:")
+        for g in sem_coluna[:10]:
+            print(f"            {g}: {_porque(g)}")
+    #: E O DESCARTE DE TODA CIDADE, e nao so das que zeraram. Cidade que perdeu 90% das
+    #: colunas entra no plano — com menos opcao do que deveria, e sem nada dizendo.
+    _muito_recusada=sorted(
+        (g for g in grupos if (_diag.get(g) or {}).get("recusadas", 0) > 0
+         and g not in sem_coluna),
+        key=lambda g: -_diag[g]["recusadas"])
+    if _muito_recusada and verbose:
+        #: NAO chamar esta variavel de `_t`: esse e o apelido do modulo `time` no topo do
+        #: arquivo, e atribui-lo aqui o torna LOCAL em toda a funcao — o `_t.time()` mais
+        #: abaixo quebra com `'int' object has no attribute 'time'`.
+        _tot_rec=sum(_diag[g]["recusadas"] for g in _muito_recusada)
+        print(f"  [info] {_tot_rec} coluna(s) candidata(s) recusada(s) em "
+              f"{len(_muito_recusada)} cidade(s) que ainda entraram no plano; a mais "
+              f"afetada: {_muito_recusada[0]} ({_porque(_muito_recusada[0])})")
 
     # ---- obras OBRIGATORIAS por CIDADE (inclui ETEs, via cidade_da) ----
     obrig_por_cidade={}
@@ -909,10 +976,15 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
     # e assim a pergunta "por que esta cidade nao tem obra?" tem resposta por SQL, sem
     # depender de alguem ter guardado o log do driver do Databricks.
     res["cidades_sem_coluna_viavel"]=sem_coluna
+    #: O diagnostico de TODAS as cidades, para a pergunta "por que esta cidade nao tem
+    #: obra?" ter resposta por SQL. Quem grava e o portao de qualidade.
+    res["diag_colunas"]={g:dict(d) for g,d in (getattr(cen,"_diag_colunas",{}) or {}).items()}
+    res["colunas_recusadas"]=sum(d.get("recusadas",0) for d in res["diag_colunas"].values())
     if sem_coluna:
         res["aviso_colunas"]=(
-            f"{len(sem_coluna)} cidade(s) sem nenhuma coluna candidata que construa algo: "
-            f"{sem_coluna[:8]}" + (" ..." if len(sem_coluna) > 8 else "")
+            f"{len(sem_coluna)} cidade(s) sem nenhuma coluna candidata que construa algo, "
+            + "; ".join(f"{g} ({_porque(g)})" for g in sem_coluna[:5])
+            + (" ..." if len(sem_coluna) > 5 else "")
             + ". O mestre escolhe uma coluna por cidade, entao elas nao podiam entrar no "
               "plano — o resultado delas nao e decisao economica.")
     if not res.get("auditoria_orcamento",{}).get("ok",True):
