@@ -165,6 +165,34 @@ def checar(cen, res, tabs, tol: float = TOL):
         add("Plano nao-vazio", n_constr > 0, f"{n_constr} obra(s) construida(s)",
             nivel="aviso")
 
+    # ---- 9. cidade sem NENHUMA coluna candidata (aviso, nao bloqueia) ----------
+    #
+    # O mestre escolhe EXATAMENTE UMA coluna por cidade. Cidade cuja unica coluna e a
+    # "nada" nao pode entrar no plano — e na tela isso e indistinguivel de "nao valeu a
+    # pena". Foi assim que tres cidades da uB2 ficaram fora de qualquer plano, com 205
+    # sub-bacias e 65.930 ligacoes novas, por um defeito no agendamento da expansao da
+    # ETE: `_colunas_faseada` descarta em silencio toda coluna que `viavel()` recusa.
+    #
+    # AVISO, e nao critico: pode ser legitimo (cidade sem obra que caiba no teto, por
+    # exemplo). O que nao pode e ficar invisivel. Com esta linha, a pergunta "por que esta
+    # cidade nao tem obra?" se responde por SQL em `run_diagnostico`, sem depender de
+    # alguem ter guardado o log do driver do Databricks — e em rede fechada, por VPN, e
+    # essa a unica trilha que sobra.
+    sem_col = list((res or {}).get("cidades_sem_coluna_viavel") or [])
+    add("Colunas candidatas: toda cidade com obra tinha opcao", not sem_col,
+        (res or {}).get("aviso_colunas") or "ok", nivel="aviso")
+    #: E O DESCARTE, sempre — inclusive nas cidades que ENTRARAM no plano. Cidade que
+    #: perdeu 90% das colunas candidatas entra com menos opcao do que devia, e isso nao
+    #: aparece em lugar nenhum. A linha sai mesmo quando passa, porque o numero em si e a
+    #: informacao: e a base de comparacao da proxima rodada.
+    _rec = int((res or {}).get("colunas_recusadas") or 0)
+    _diag = (res or {}).get("diag_colunas") or {}
+    _test = sum(int(d.get("testadas") or 0) for d in _diag.values())
+    add("Colunas candidatas: quantas foram recusadas", True,
+        (f"{_rec} de {_test} recusadas em {len(_diag)} cidade(s)" if _test
+         else "sem diagnostico (rodada nao faseada ou solver nao usado)"),
+        nivel="aviso")
+
     criticos = [r for r in rel if r["nivel"] == "critico"]
     ok = all(r["ok"] for r in criticos)
     n_falhas = sum(1 for r in criticos if not r["ok"])

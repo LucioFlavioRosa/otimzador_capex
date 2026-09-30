@@ -97,6 +97,73 @@ def _normalizar_orcamento(v):
     return v
 
 
+def _raizes_do_motor():
+    """As pastas que contem o codigo DO MOTOR, para separa-lo de biblioteca na pilha.
+
+    REGRA POSITIVA, e nao negativa. A primeira versao perguntava "este arquivo NAO esta nos
+    caminhos que o `sysconfig` declara?" — e `sysconfig` inclui `purelib`/`platlib`, que sao
+    `site-packages`. No Databricks o motor e instalado como WHEEL, dentro de
+    `site-packages`: o filtro descartava os quadros do proprio motor justamente no ambiente
+    de producao, e a causa voltava a ser nome de biblioteca. Defeito confirmado na revisao de
+    30/09/2026.
+
+    Perguntar "esta sob a raiz do pacote?" vale nos tres arranjos em que este codigo roda:
+
+      repo          `otimizador/aplicacao/job_databricks.py` -> `.../otimizador`
+      wheel         `site-packages/otimizador/...`           -> `.../site-packages/otimizador`
+      pacote plano  `pacote-motor-main/job_databricks.py`    -> `.../pacote-motor-main`
+
+    Funcao propria para o teste do FALLBACK poder troca-la: sem esse encaixe nao ha como
+    montar uma pilha sem nenhum quadro nosso, e o teste que eu escrevi para isso passava sem
+    exercitar nada.
+    """
+    import os
+    import sys
+    raizes = {os.path.dirname(os.path.abspath(__file__))}
+    topo = (__package__ or "").split(".")[0]
+    mod = sys.modules.get(topo) if topo else None
+    arq = getattr(mod, "__file__", None)
+    if arq:
+        raizes.add(os.path.dirname(os.path.abspath(arq)))
+    return tuple(sorted(r.replace("\\", "/").lower() for r in raizes))
+
+
+def _onde_estourou(tb, quadros=3):
+    """As ultimas chamadas da pilha, como `arquivo.py:linha em funcao`.
+
+    POR QUE ISSO VAI PARA O BANCO. `run_status.erro` guardava so
+    `f"{type(e).__name__}: {e}"` — o QUE falhou, nunca o ONDE. O traceback completo existe,
+    mas so no log do driver do Databricks, que expira e que nem todo mundo alcanca. Quem
+    opera por VPN chega ao Postgres com um `psql`; se a localizacao nao estiver ali, o
+    primeiro passo de todo incidente e pedir a alguem que exporte um log.
+
+    TRES QUADROS, E OS ULTIMOS: o topo da pilha e sempre `rodar()`, que nao diz nada. O
+    fundo e onde a excecao nasceu.
+
+    Sai sem caminho absoluto de proposito — `arquivo.py` e o que localiza, e o resto e mapa
+    da maquina. `causa_segura` (no servico) tambem corta caminho ao servir, mas esta funcao
+    nao depende disso: o que nao e gravado nao vaza.
+    """
+    import os
+    #: O QUADRO MAIS PROFUNDO COSTUMA SER BIBLIOTECA, e nao codigo nosso. Num `INSERT` que
+    #: falha, a pilha termina dentro do driver — medido: `extras.py:1299 em execute_values`
+    #: como primeiro quadro, e `publicacao.py:262 em publicar_postgres` atras. O primeiro
+    #: nome nao ajuda quem vai abrir um arquivo do motor.
+    #:
+    #: Entao ficam os quadros do MOTOR. Se NENHUM for do motor — falha inteiramente dentro
+    #: de dependencia ou do chamador —, valem os ultimos, porque um nome de biblioteca ainda
+    #: e melhor do que nada.
+    raizes = _raizes_do_motor()
+
+    def _nosso(q):
+        c = os.path.abspath(q.filename).replace("\\", "/").lower()
+        return c.startswith(raizes)
+    pilha = traceback.extract_tb(tb)
+    escolhidos = [q for q in pilha if _nosso(q)] or list(pilha)
+    return " <- ".join(f"{os.path.basename(q.filename)}:{q.lineno} em {q.name}"
+                       for q in reversed(escolhidos[-quadros:]))
+
+
 def _exigir_teto_anual(cen):
     """Falha cedo se o Cenario ficou SEM teto anual de CAPEX.
 
@@ -116,6 +183,54 @@ def _exigir_teto_anual(cen):
             f"sem teto anual de CAPEX para {sem_teto}: informe ORCAMENTO no run_request "
             f"(numero, {{ano: teto}} ou {{unidade: teto}}) ou preencha input.orcamento. "
             f"ORCAMENTO_TOTAL sozinho nao define o teto por ano.")
+
+
+#: As colunas que a PUBLICACAO grava e que vieram de migracao do schema de resultado.
+#: Cada linha e (coluna, arquivo da migracao) — o arquivo e o que o operador precisa ler.
+_COLUNAS_DE_MIGRACAO_DO_RESULTADO = [
+    ("capex_terreno", "ddl_resultado_migracao_02.sql"),
+    ("capex_modulos_iniciais", "ddl_resultado_migracao_02.sql"),
+    ("capex_modulos_expansao", "ddl_resultado_migracao_02.sql"),
+]
+
+
+def _exigir_colunas_do_resultado(pg_url, schema="public"):
+    """Falha ANTES do solver se `otim_obra` nao tem as colunas que a publicacao grava.
+
+    Sem isto, a falta de uma migracao do schema de resultado aparece no FIM: a rodada
+    carrega o cadastro, resolve, materializa, passa pelo portao de qualidade, pode escrever
+    o blob — e quebra no `INSERT` com `UndefinedColumn: column "capex_terreno" of relation
+    "otim_obra" does not exist`. O custo e uma execucao inteira do Databricks, e a mensagem
+    que o operador ve nao diz qual migracao aplicar.
+
+    Medido em 30/09/2026, na revisao de producao: a publicacao e atomica (nao sobra
+    `otim_meta` nem `otim_obra`), mas o blob pode ja ter sido escrito, porque a ordem do job
+    e blob -> Postgres -> notificacao.
+
+    Tabela AUSENTE nao e erro: `publicar_postgres(criar=True)` cria o schema do zero, e ai
+    ela nasce com as colunas. O que se checa e a tabela que EXISTE e esta velha.
+    """
+    from sqlalchemy import create_engine, text
+    eng = create_engine(pg_url)
+    try:
+        with eng.connect() as con:
+            existe = con.execute(text(
+                "SELECT 1 FROM information_schema.tables"
+                " WHERE table_schema = :s AND table_name = 'otim_obra'"),
+                {"s": schema}).fetchone()
+            if not existe:
+                return                      # schema novo: a criacao ja traz as colunas
+            tem = {r[0] for r in con.execute(text(
+                "SELECT column_name FROM information_schema.columns"
+                " WHERE table_schema = :s AND table_name = 'otim_obra'"), {"s": schema})}
+    finally:
+        eng.dispose()
+    faltam = sorted({f"{arq} (falta {schema}.otim_obra.{col})"
+                     for col, arq in _COLUNAS_DE_MIGRACAO_DO_RESULTADO if col not in tem})
+    if faltam:
+        raise RuntimeError(
+            "o schema de resultado esta desatualizado e a publicacao falharia no fim da "
+            f"rodada. Aplique: {'; '.join(faltam)}")
 
 
 def _params_para_ler_banco(p):
@@ -211,6 +326,10 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
         #     `input.orcamento` valer. Sem isso o CP-SAT estoura convertendo INF em int.
         _exigir_teto_anual(cen)
 
+        # 3c) e o schema de RESULTADO tem de aceitar o que a publicacao grava. Aqui, e nao
+        #     no fim: sem esta checagem a falta de uma migracao custa a rodada inteira.
+        _exigir_colunas_do_resultado(pg_url, schema=schema_pub)
+
         # 4) otimizacao
         res = CP.resolver_por_sistema(cen,
                                       max_time_s=p.get("MAX_TIME_S", max_time_s),
@@ -257,7 +376,13 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
 
     except Exception as e:                       # qualquer falha tecnica -> ERRO (nao vazio)
         try:
-            PUB.marcar_status_controle(pg_url, run_id, "ERRO", erro=f"{type(e).__name__}: {e}")
+            # A LOCALIZACAO VEM ANTES DA MENSAGEM, e nao depois: o servico corta a causa
+            # em 500 caracteres ao servir (`causa_segura`), e uma mensagem longa de SQL
+            # empurraria o `arquivo.py:linha` para fora do corte — justamente a parte que
+            # responde "onde no codigo?".
+            _onde = _onde_estourou(e.__traceback__)
+            PUB.marcar_status_controle(pg_url, run_id, "ERRO",
+                                       erro=f"{type(e).__name__} em {_onde}: {e}")
         except Exception:                        # banco fora do ar e a causa mais provavel
             print("ATENCAO: falhou tambem ao marcar ERRO:\n" + traceback.format_exc())
         print("ERRO na rodada:\n" + traceback.format_exc())

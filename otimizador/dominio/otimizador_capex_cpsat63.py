@@ -14,6 +14,7 @@ Interface identica a do MILP: resolver_cpsat(cen, ...) e resolver_cpsat_por_regi
 Rode no Colab:  pip install ortools
 """
 import math
+import re as _re
 from otimizador.dominio import otimizador_capex_v62 as M   # unica linha alterada na reorganizacao
 def _orck(cen):   # v26: sem financiamento -> sempre o CAPEX cheio entra na restricao de orcamento
     return "capex_ano"
@@ -27,8 +28,10 @@ def _coefs(cen):
             for m in range(y,min(y+pe,Hm)): v+=cm/(1+tx)**(m//12)
         elif y<Hm: v+=o.capex/(1+tx)**(y//12)
         return v
-    def modulo_pv(e,y):
-        tx=cen.taxa_de(e);Hm=cen.horizonte(e)*12;pe=e.prazo;cap=e.capex_modulo;v=0.0
+    def modulo_pv(e,y,preco=None):
+        """Valor presente de UM modulo. `preco` para o de expansao, que pode ter o dele."""
+        tx=cen.taxa_de(e);Hm=cen.horizonte(e)*12;pe=e.prazo;v=0.0
+        cap=e.capex_modulo if preco is None else preco
         if pe>0:
             cm=cap/pe
             for m in range(y,min(y+pe,Hm)): v+=cm/(1+tx)**(m//12)
@@ -106,20 +109,49 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
     # de tamanho fixo, com um teto duro de vazao; agora expande por demanda como a que ja
     # existe, e a unica diferenca e o PISO: se a ETE e construida, ela nasce com pelo menos
     # os `modulos` do cadastro — o pacote projetado, indivisivel.
-    nmod={};zmod={}
+    # O MODULO DE EXPANSAO PODE TER CAPACIDADE E PRECO PROPRIOS (29/09/2026), e por isso a
+    # ETE NOVA tem DUAS contagens aqui.
+    #
+    # Com uma variavel so — `nmod` modulos, todos ao `cap_modulo` e ao `capex_modulo` do
+    # inicial — o modelo mentia nos dois sentidos. Medido: modulo inicial de 150 e expansao
+    # de 10, 180 de vazao, orcamento de 4.000.000 por ano. O solver dizia OTIMO comprando 2
+    # modulos (300 de capacidade, 1.000.000), enquanto a regra real cobra 1 + teto(30/10) =
+    # 4 modulos e 2.300.000 — e `viavel()` recusava o plano por estouro de orcamento.
+    #
+    # `nmod` continua sendo o TOTAL (e o que o OPEX por modulo multiplica, que nao distingue
+    # os tipos); `nexp` e a parte que responde a demanda, ao preco e a capacidade dela.
+    nmod={};zmod={};nexp={};zexp={}
     for e in etes:
         if EF: continue
         cap=e.cap_modulo or 1e-9
-        _piso=int(getattr(e,"modulos",0) or 0) if getattr(e,"nova",False) else 0
-        Nmax=max(_piso,int(math.ceil(sum(cen.vazao.get(sb,0.0) for sb in sis_sb.get(e.sistema,[]))/cap)))+1
+        _nova=bool(getattr(e,"nova",False))
+        _piso=int(getattr(e,"modulos",0) or 0) if _nova else 0
+        _capx,_px=M.modulo_de_expansao(e)      # A UNICA leitura da regra, como no resto
+        _capx=_capx or 1e-9
+        _dem=sum(cen.vazao.get(sb,0.0) for sb in sis_sb.get(e.sistema,[]))
+        # O TETO de cada variavel tem de caber a demanda pelo divisor DELA: dimensionado
+        # pelo modulo inicial, um modulo de expansao menor nao alcancaria a vazao e o
+        # modelo ficaria inviavel — ou deixaria sub-bacia de fora — por limite artificial.
+        _xmax=int(math.ceil(max(0.0,_dem-_piso*cap)/_capx))+1 if _nova else 0
+        Nmax=max(_piso+_xmax,int(math.ceil(_dem/cap)))+1
         nmod[e.id]=md.NewIntVar(0,Nmax,f"nmod_{e.id}")
         md.Add(nmod[e.id]<=Nmax*built[e.id]); md.Add(nmod[e.id]>=built[e.id])
-        if _piso: md.Add(nmod[e.id]>=_piso*built[e.id])
-        zmod[e.id]={}
+        nexp[e.id]=md.NewIntVar(0,_xmax,f"nexp_{e.id}")
+        if _nova:
+            md.Add(nexp[e.id]<=_xmax*built[e.id])
+            # O pacote e PISO e e indivisivel: construida a ETE, ela nasce com `modulos`
+            # modulos iniciais, e todo modulo alem deles e expansao.
+            md.Add(nmod[e.id]==_piso*built[e.id]+nexp[e.id])
+        else:
+            md.Add(nexp[e.id]==0)
+        zmod[e.id]={};zexp[e.id]={}
         for t in perm[e.id]:
             z=md.NewIntVar(0,Nmax,f"z_{e.id}_{t}")
             md.Add(z==nmod[e.id]).OnlyEnforceIf(x[e.id][t]); md.Add(z==0).OnlyEnforceIf(x[e.id][t].Not())
             zmod[e.id][t]=z
+            zx=md.NewIntVar(0,max(0,_xmax),f"zx_{e.id}_{t}")
+            md.Add(zx==nexp[e.id]).OnlyEnforceIf(x[e.id][t]); md.Add(zx==0).OnlyEnforceIf(x[e.id][t].Not())
+            zexp[e.id][t]=zx
 
     # ---- conectividade (AND dos componentes do caminho) — so no modo modular ----
     conect={}
@@ -138,7 +170,22 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
         # MESMA RESTRICAO PARA AS DUAS: a capacidade construida cobre a demanda conectada.
         # Era `dem <= modulos*cap` na ETE nova — teto duro que o solver nao podia comprar,
         # e por isso ele simplesmente deixava sub-bacias fora do plano.
-        md.Add(nmod[e.id]*int(round(e.cap_modulo*VZ)) >= dem - int(round(e.folga*VZ)))
+        #
+        # E cada PARCELA entra com a capacidade dela: o pacote com a do modulo inicial, a
+        # expansao com a do modulo de expansao. Com uma capacidade so, um modulo de expansao
+        # menor era contado como se fosse do tamanho do inicial.
+        _falta=dem - int(round(e.folga*VZ))
+        if getattr(e,"nova",False):
+            # `modulos` iniciais (piso indivisivel, que so existe se a ETE for construida)
+            # + os de expansao, cada parcela com a capacidade do SEU tipo. Vale tambem para
+            # `modulos=0`, e ai a capacidade inteira vem da expansao — as 69 ETEs novas sem
+            # modulos no cadastro de 09/2026.
+            _capx,_ = M.modulo_de_expansao(e)
+            _pac=int(getattr(e,"modulos",0) or 0)
+            md.Add(_pac*int(round(e.cap_modulo*VZ))*built[e.id]
+                   + nexp[e.id]*int(round(_capx*VZ)) >= _falta)
+        else:
+            md.Add(nmod[e.id]*int(round(e.cap_modulo*VZ)) >= _falta)
         if getattr(e,"nova",False):
             # greenfield: sem estacao nao ha para onde mandar, nem com folga
             for sb in sis_sb.get(e.sistema,[]): md.Add(built[e.id]>=conect[sb])
@@ -210,7 +257,13 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
                     # DUAS PARCELAS: o TERRENO e do pacote e se paga uma vez (segue `x`); os
                     # MODULOS seguem `zmod`, que e quantos o solver escolheu — o pacote e o
                     # piso dele. Antes o CAPEX era o pacote fixo, e a expansao nao existia.
-                    ter=e.capex_terreno; cmt=ter/pe if pe>0 else 0
+                    # O PACOTE E UMA PARCELA SO: terreno + os `modulos` iniciais, que sao
+                    # indivisiveis e seguem `x` (paga-se uma vez, se a ETE for construida).
+                    # A EXPANSAO segue `zexp`, ao preco DELA — antes tudo ia por `zmod` ao
+                    # preco do modulo inicial, o que subcusteava a expansao mais cara e
+                    # sobrecusteava a mais barata.
+                    ter=e.capex_terreno+int(getattr(e,"modulos",0) or 0)*e.capex_modulo
+                    cmt=ter/pe if pe>0 else 0
                     for t in perm[e.id]:
                         val=0.0
                         if pe>0:
@@ -218,14 +271,15 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
                                 if m//12==Y: val+=cmt
                         elif t//12==Y: val=ter
                         if val>0: vs.append(x[e.id][t]); cs.append(R(val))
-                    cm=e.capex_modulo/pe if pe>0 else 0
+                    _px=M.modulo_de_expansao(e)[1]
+                    cm=_px/pe if pe>0 else 0
                     for t in perm[e.id]:
                         val=0.0
                         if pe>0:
                             for m in range(t,t+pe):
                                 if m//12==Y: val+=cm
-                        elif t//12==Y: val=e.capex_modulo
-                        if val>0: vs.append(zmod[e.id][t]); cs.append(R(val))
+                        elif t//12==Y: val=_px
+                        if val>0: vs.append(zexp[e.id][t]); cs.append(R(val))
                 else:
                     cm=e.capex_modulo/pe if pe>0 else 0
                     for t in perm[e.id]:
@@ -248,10 +302,13 @@ def resolver_cpsat(cen, max_time_s=120, workers=8, grid_meses=12, meta_hard=Fals
         if EF:
             for t in perm[e.id]: addterm(x[e.id][t],-R(pv_lump(e,e.capex_fixo,t)))
         elif getattr(e,"nova",False):
-            # terreno (uma vez, com a obra) + modulos (quantos o solver comprar)
+            # O PACOTE (terreno + os `modulos` iniciais, indivisiveis) uma vez, com a obra;
+            # + a expansao, quantos o solver comprar, ao preco DELA.
+            _pac=e.capex_terreno+int(getattr(e,"modulos",0) or 0)*e.capex_modulo
+            _px=M.modulo_de_expansao(e)[1]
             for t in perm[e.id]:
-                addterm(x[e.id][t],-R(pv_lump(e,e.capex_terreno,t)))
-                addterm(zmod[e.id][t],-R(modulo_pv(e,t)))
+                addterm(x[e.id][t],-R(pv_lump(e,_pac,t)))
+                addterm(zexp[e.id][t],-R(modulo_pv(e,t,_px)))
         else:
             for t in perm[e.id]: addterm(zmod[e.id][t],-R(modulo_pv(e,t)))
     for c in coletas:
@@ -339,9 +396,41 @@ def _montar_faseado(sub, built, shift_meses=0):
     for sis,mm in getattr(sub,"modulos_sis",{}).items():
         e=sub.ete_do_sistema.get(sis)
         tot=sum(sub.vazao.get(sb,0.0) for sb in built if sub.nos[sb].sistema==sis)
-        need=int(math.ceil(max(0.0,tot-e.folga)/e.cap_modulo)) if (e and e.cap_modulo>0) else (1 if (e and tot>e.folga) else 0)
-        for k,mo in enumerate(mm):
-            pl[mo.id]=(mo.inicio_min+shift_meses) if k<need else None
+        # A CONTA E DE CAPACIDADE, E NAO DE CABECAS DE MODULO (29/09/2026).
+        #
+        # `mm` na ETE nova comeca pelo PACOTE, que vale `modulos` modulos, e segue com as
+        # expansoes, que podem ter capacidade PROPRIA. Dividir a demanda por `cap_modulo` e
+        # contar obras subestimava o pacote e superestimava cada expansao: com o modulo de
+        # expansao MENOR que o inicial, o plano saia desta funcao sem capacidade para a
+        # vazao conectada, `viavel()` cortava as sub-bacias do sistema e a coluna candidata
+        # entrava no mestre valendo menos receita do que deveria — sem erro nenhum.
+        #
+        # Somando a capacidade de cada modulo na ordem em que `mm` os traz (pacote antes da
+        # expansao, que e a precedencia fisica), o resultado e o mesmo de antes onde os
+        # modulos sao iguais, e passa a ser correto onde nao sao.
+        falta=max(0.0,tot-e.folga) if e else 0.0
+        # "Capacidade nao declarada" e propriedade da ETE, e nao de cada modulo: um PACOTE
+        # de zero modulos tem capacidade zero de verdade, e nao pode contar como se
+        # resolvesse a demanda so porque o numero dele e zero.
+        _sem_cap=bool(e) and not (float(getattr(e,"cap_modulo",0.0) or 0.0)>0)
+        # E A EXPANSAO SO PODE COMECAR COM O PACOTE PRONTO — a mesma regra que `viavel()`
+        # cobra, e que esta funcao ignorava.
+        #
+        # Consequencia, achada em 29/09/2026: `_colunas_faseada` descarta em silencio toda
+        # coluna que `viavel()` recusa (`if not M.viavel(...): continue`). Com a expansao
+        # agendada junto com o pacote, TODA ETE nova que precisasse expandir tinha todas as
+        # suas colunas recusadas, e do sistema sobrava apenas a coluna "nao constroi nada" —
+        # as sub-bacias dele nunca entravam no plano, sem erro nenhum aparecer.
+        _pac=next((m for m in mm if getattr(m,"e_pacote",False)),None)
+        for mo in mm:
+            if falta<=1e-9: pl[mo.id]=None; continue
+            pl[mo.id]=mo.inicio_min+shift_meses
+            if getattr(mo,"depende_do_pacote",False) and _pac is not None:
+                _yp=pl.get(_pac.id)
+                if _yp is None: pl[mo.id]=None; continue      # sem pacote nao ha expansao
+                pl[mo.id]=max(pl[mo.id],_yp+_pac.prazo)
+            if _sem_cap: falta=0.0; continue     # capacidade nao declarada: um modulo resolve
+            falta-=float(getattr(mo,"cap_modulo",0.0) or 0.0)
     return pl
 
 def _plano_sistema_faseado(sub):
@@ -372,14 +461,51 @@ def _colunas_faseada(cen,sis,sub,reg,anos,ac):
     for _,sb in marg:                                            # subconjuntos decrescentes (flexibilidade de orcamento)
         cur=cur-{sb}
         if cur: subsets.append(set(cur))
+    # ---- O DESCARTE DE COLUNA PASSA A SER CONTADO ----
+    #
+    # As duas linhas abaixo (`break` por horizonte e `continue` por `viavel()`) sao o ponto
+    # cego mais caro deste solver: coluna recusada nao da erro, ela deixa de existir. Foi
+    # assim que cidades inteiras da uB2 sairam de qualquer plano — e o resultado apareceu
+    # na tela como decisao economica normal.
+    #
+    # CONTAR O DESCARTE, e nao inferir da cobertura: "nenhuma coluna constroi este sistema"
+    # tambem acontece quando o sistema nao valia a pena, e tratar economia como falha seria
+    # ruido. O que distingue os dois e o MOTIVO — e ele so existe aqui, onde a recusa
+    # acontece. Por isso o diagnostico nasce neste laco e viaja no `cen`, como
+    # `_obrig_desconsideradas` ja faz.
+    #
+    # `sis` e o nome do parametro, mas o recorte e a CIDADE (ver `_sub_cenario_cidade`).
+    _d = {"testadas": 0, "aceitas": 0, "recusadas": 0, "fora_da_janela": 0,
+          "repetidas": 0, "motivos": {}}
     for bs in subsets:
         for d in range(ac):
             pl=_montar_faseado(sub,bs,d*12)
-            if any(v is not None and v>=ac*12 for v in pl.values()): break
-            if not M.viavel(sub,pl)[0]: continue
+            _d["testadas"]+=1
+            if any(v is not None and v>=ac*12 for v in pl.values()):
+                _d["fora_da_janela"]+=1; break
+            _ok,_motivo=M.viavel(sub,pl)
+            if not _ok:
+                _d["recusadas"]+=1
+                #: O QUE INTERESSA E O PADRAO, e o motivo vem com id de obra e numero de
+                #: mes dentro. Sem normalizar, "expansao comeca no mes 9 ... (mes 26)" e
+                #: "... mes 21 ... (mes 38)" viram duas linhas de 26 em vez de uma de 52, e
+                #: o histograma deixa de mostrar qual regra recusou mais.
+                #:
+                #: O exemplo guarda o texto inteiro, com id e mes, para quem for investigar.
+                _chave=str(_motivo).split(": ",1)[-1] if ": " in str(_motivo) else str(_motivo)
+                _chave=_re.sub(r"\d+","N",_chave)
+                _chave=_re.sub(r"\w*_\w+","<obra>",_chave)
+                _m=_d["motivos"].setdefault(_chave,{"n":0,"exemplo":str(_motivo)})
+                _m["n"]+=1
+                continue
             r=M.avaliar(sub,pl); key=round(r["vpl_obj"])
-            if key in seen: continue
-            seen.add(key); cols.append((r["vpl_obj"],list(r[_orck(cen)][reg]),dict(pl),r["vpl"],r["metas_nao_atingidas"],_cov(r)))
+            if key in seen:
+                _d["repetidas"]+=1; continue
+            seen.add(key); _d["aceitas"]+=1
+            cols.append((r["vpl_obj"],list(r[_orck(cen)][reg]),dict(pl),r["vpl"],r["metas_nao_atingidas"],_cov(r)))
+    if not hasattr(cen,"_diag_colunas"): cen._diag_colunas={}
+    _d["sub_bacias_no_conjunto"]=len(built)
+    cen._diag_colunas[sis]=_d
     return cols
 
 def _sub_cenario_cidade(cen, cid):
@@ -499,6 +625,60 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
         _w=float(_pc.get(_g,1.0))
         cols[_g]=[(vpl,(list(prof)+[0.0]*anos)[:anos],pl,vr,mn*_w,cv*_w) for (vpl,prof,pl,vr,mn,cv) in cols[_g]]
     if verbose: print(f"colunas: {sum(len(v) for v in cols.values())} ({len(grupos)} cidades) em {_t.time()-t0:.0f}s")
+
+    # ---- CIDADE SEM NENHUMA COLUNA QUE CONSTRUA ALGO ----
+    #
+    # O mestre escolhe EXATAMENTE UMA coluna por cidade (`AddExactlyOne`). Se a unica que
+    # sobrou for a "nada", a cidade nao entra em plano nenhum — e isso aparece na tela como
+    # decisao economica normal, indistinguivel de "nao valeu a pena".
+    #
+    # E e o modo de falha mais caro que este solver tem, porque `_colunas_faseada` descarta
+    # em SILENCIO toda coluna que `viavel()` recusa. Foi assim que tres cidades da uB2
+    # (Cabo Frio, Nilopolis e Pinheiral) ficaram fora de qualquer plano — 205 sub-bacias e
+    # 65.930 ligacoes novas — por um defeito no agendamento da expansao da ETE, sem uma
+    # linha de log em nenhum lugar.
+    #
+    # O aviso nao julga a decisao: cidade sem obra AEGEA disponivel nao entra na lista, e
+    # cidade com opcao que o mestre nao escolheu tambem nao. A lista e so de quem nao TINHA
+    # opcao. Em rede fechada, o que nao se ve nao se conserta.
+    _tem_obra_aegea={g:False for g in grupos}
+    for _oid,_o in cen.obras.items():
+        if _o.eh_aegea(): _tem_obra_aegea[cen.cidade_da(_o)]=True
+    sem_coluna=sorted(g for g in grupos if _tem_obra_aegea.get(g)
+                      and not any(any(v is not None for v in c[2].values()) for c in cols[g]))
+    #: O MOTIVO, que e o que responde "por que esta cidade nao tem obra?". Sem ele o aviso
+    #: diz que algo deu errado e deixa a investigacao inteira para quem le. Ele vem de
+    #: `_colunas_faseada`, que conta o descarte no lugar onde ele acontece.
+    _diag=getattr(cen,"_diag_colunas",{}) or {}
+    def _porque(g):
+        d=_diag.get(g) or {}
+        if not d: return "sem diagnostico"
+        if d.get("recusadas"):
+            pior=max(d["motivos"].items(), key=lambda kv: kv[1]["n"], default=(None,None))
+            if pior[0]: return f"{d['recusadas']} de {d['testadas']} recusadas — {pior[0]}"
+        if d.get("fora_da_janela"): return f"{d['fora_da_janela']} fora da janela de CAPEX"
+        if not d.get("sub_bacias_no_conjunto"):
+            return "nenhuma sub-bacia entrou no conjunto inicial (decisao economica)"
+        return f"{d['testadas']} testadas, nenhuma aceita"
+    if sem_coluna and verbose:
+        print(f"  [aviso] {len(sem_coluna)} cidade(s) sem NENHUMA coluna candidata que "
+              f"construa algo — elas nao podem entrar no plano:")
+        for g in sem_coluna[:10]:
+            print(f"            {g}: {_porque(g)}")
+    #: E O DESCARTE DE TODA CIDADE, e nao so das que zeraram. Cidade que perdeu 90% das
+    #: colunas entra no plano — com menos opcao do que deveria, e sem nada dizendo.
+    _muito_recusada=sorted(
+        (g for g in grupos if (_diag.get(g) or {}).get("recusadas", 0) > 0
+         and g not in sem_coluna),
+        key=lambda g: -_diag[g]["recusadas"])
+    if _muito_recusada and verbose:
+        #: NAO chamar esta variavel de `_t`: esse e o apelido do modulo `time` no topo do
+        #: arquivo, e atribui-lo aqui o torna LOCAL em toda a funcao — o `_t.time()` mais
+        #: abaixo quebra com `'int' object has no attribute 'time'`.
+        _tot_rec=sum(_diag[g]["recusadas"] for g in _muito_recusada)
+        print(f"  [info] {_tot_rec} coluna(s) candidata(s) recusada(s) em "
+              f"{len(_muito_recusada)} cidade(s) que ainda entraram no plano; a mais "
+              f"afetada: {_muito_recusada[0]} ({_porque(_muito_recusada[0])})")
 
     # ---- obras OBRIGATORIAS por CIDADE (inclui ETEs, via cidade_da) ----
     obrig_por_cidade={}
@@ -792,6 +972,21 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
         if verbose: print("  [aviso] "+aviso)
     res["aviso_obrigatoria"]=aviso
     res["obrig_desconsideradas_fora_janela"]=getattr(cen,"_obrig_desconsideradas",[])
+    # Viaja no resultado para o portao de qualidade transformar em linha de diagnostico —
+    # e assim a pergunta "por que esta cidade nao tem obra?" tem resposta por SQL, sem
+    # depender de alguem ter guardado o log do driver do Databricks.
+    res["cidades_sem_coluna_viavel"]=sem_coluna
+    #: O diagnostico de TODAS as cidades, para a pergunta "por que esta cidade nao tem
+    #: obra?" ter resposta por SQL. Quem grava e o portao de qualidade.
+    res["diag_colunas"]={g:dict(d) for g,d in (getattr(cen,"_diag_colunas",{}) or {}).items()}
+    res["colunas_recusadas"]=sum(d.get("recusadas",0) for d in res["diag_colunas"].values())
+    if sem_coluna:
+        res["aviso_colunas"]=(
+            f"{len(sem_coluna)} cidade(s) sem nenhuma coluna candidata que construa algo, "
+            + "; ".join(f"{g} ({_porque(g)})" for g in sem_coluna[:5])
+            + (" ..." if len(sem_coluna) > 5 else "")
+            + ". O mestre escolhe uma coluna por cidade, entao elas nao podiam entrar no "
+              "plano — o resultado delas nao e decisao economica.")
     if not res.get("auditoria_orcamento",{}).get("ok",True):
         res["aviso_orcamento"]=("PLANO AINDA ESTOURA O TETO apos o reparo - confira se engine, solver e banco "
                                 "estao na mesma versao e se a celula de carga nao foi reexecutada depois do solve.")

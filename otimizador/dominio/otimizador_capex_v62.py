@@ -194,6 +194,29 @@ def _conectada(cen,sb,plano):
     for r in rr:
         if r.eh_aegea() and plano.get(r.id) is None: return False
     return True
+def modulo_de_expansao(e):
+    """(capacidade, capex) do modulo que EXPANDE a ETE. E A UNICA LEITURA DESTA REGRA.
+
+    Pedido do cliente em 29/09/2026: na ETE NOVA constroi-se uma quantidade definida de
+    modulos iniciais e depois expande-se se necessario — e os dois tipos tem vazao e preco
+    diferentes. A quantidade inicial continua na coluna `modulos`, que nao muda de
+    significado nem ganha par.
+
+    VALE SO PARA A ETE NOVA. Numa ETE que ja existe todo modulo e expansao no sentido
+    fisico, e `capacidade_por_modulo`/`capex_por_modulo` ja significam ali "o modulo que eu
+    construo" — usar as colunas novas mudaria o numero das 347 que estao no cadastro.
+
+    Coluna vazia = o modulo de expansao e igual ao inicial, o comportamento de sempre. Por
+    isso a leitura guarda None em vez de 0.0: no cadastro "nao informado" e "sem custo" nao
+    podem virar a mesma coisa.
+    """
+    cap=float(getattr(e,"cap_modulo",0.0) or 0.0)
+    capex=float(getattr(e,"capex_modulo",0.0) or 0.0)
+    if not getattr(e,"nova",False): return cap,capex
+    _c=getattr(e,"cap_modulo_exp",None); _x=getattr(e,"capex_modulo_exp",None)
+    return (cap if _c is None else float(_c)),(capex if _x is None else float(_x))
+
+
 def capex_fixo_da_ete(e, vazao_total):
     """(capex, n_modulos) de uma ETE pre-dimensionada para `vazao_total`.
 
@@ -207,13 +230,16 @@ def capex_fixo_da_ete(e, vazao_total):
     ETE EM EXPANSAO: so o que a folga nao absorve.
     """
     cap=float(getattr(e,"cap_modulo",0.0) or 0.0)
-    def _mods(excedente):
+    def _mods(excedente,c=None):
+        c=cap if c is None else c
         if excedente<=1e-9: return 0
-        return int(math.ceil(excedente/cap)) if cap>0 else 1
+        return int(math.ceil(excedente/c)) if c>0 else 1
     if getattr(e,"nova",False):
         n=int(getattr(e,"modulos",0) or 0)
-        n+=_mods(max(0.0,vazao_total-n*cap))
-        return float(getattr(e,"capex_terreno",0.0) or 0.0)+n*e.capex_modulo, n
+        cap_x,capex_x=modulo_de_expansao(e)      # capacidade e preco proprios (29/09/2026)
+        x=_mods(max(0.0,vazao_total-n*cap),cap_x)
+        return (float(getattr(e,"capex_terreno",0.0) or 0.0)
+                +n*e.capex_modulo+x*capex_x), n+x
     n=_mods(max(0.0,vazao_total-float(getattr(e,"folga",0.0) or 0.0)))
     return n*e.capex_modulo, n
 
@@ -250,19 +276,31 @@ def _dimensiona_etes(cen,plano):
             e.necessaria=(d>1e-9)
             _cap_pac=e.modulos*e.cap_modulo                     # capacidade do pacote
             _exc=max(0.0,d-_cap_pac)                            # o que sobra para a expansao
-            _extra=int(math.ceil(_exc/e.cap_modulo)) if (_exc>1e-9 and e.cap_modulo>0) else (1 if _exc>1e-9 else 0)
+            # E O MODULO DE EXPANSAO TEM CAPACIDADE E PRECO PROPRIOS (29/09/2026): o
+            # excedente e dividido pela capacidade DELE e cada um custa o preco DELE.
+            _cap_x,_px=modulo_de_expansao(e)
+            _extra=int(math.ceil(_exc/_cap_x)) if (_exc>1e-9 and _cap_x>0) else (1 if _exc>1e-9 else 0)
             e.n_mod=e.modulos+_extra
+            # `n_mod_ini` e `n_mod_exp` separam os modulos pelo PRECO que cada um pagou —
+            # nao pela fase em que entrou. E o que permite a publicacao mostrar as parcelas
+            # e a conta fechar na tela com dois unitarios diferentes.
+            e.n_mod_ini=e.modulos; e.n_mod_exp=_extra
             e.cap_max=None                                      # sem teto: a expansao acompanha a demanda
-            cap=(e.capex_terreno+e.n_mod*e.capex_modulo) if e.necessaria else 0.0
+            cap=(e.capex_terreno+e.modulos*e.capex_modulo+_extra*_px) if e.necessaria else 0.0
             e.capex=cap
             e.capex_comp=({f"ETE nova: terreno + {e.modulos} mod":e.capex_terreno+e.modulos*e.capex_modulo}
                           if e.necessaria else {})
             if e.necessaria and _extra>0:
-                e.capex_comp[f"ETE nova: expansao {_extra} mod"]=_extra*e.capex_modulo
+                e.capex_comp[f"ETE nova: expansao {_extra} mod"]=_extra*_px
+            e.parcela_terreno=e.capex_terreno if e.necessaria else 0.0
+            e.parcela_mod_ini=(e.modulos*e.capex_modulo) if e.necessaria else 0.0
+            e.parcela_mod_exp=(_extra*_px) if e.necessaria else 0.0
         else:                                                   # EXPANSAO (calcula modulos pela vazao)
             exc=max(0.0,d-e.folga)
             n=int(math.ceil(exc/e.cap_modulo)) if (exc>1e-9 and e.cap_modulo>0) else (1 if exc>1e-9 else 0)
             e.n_mod=n; cap=n*e.capex_modulo
+            e.n_mod_ini=n; e.n_mod_exp=0                        # todos ao preco de `capex_por_modulo`
+            e.parcela_terreno=0.0; e.parcela_mod_ini=cap; e.parcela_mod_exp=0.0
             e.capex=cap; e.necessaria=(n>0)
             e.capex_comp={f"ETE {n} mod":cap} if n>0 else {}
         e.responsavel="Aegea" if e.capex>1e-9 else "-"
@@ -270,7 +308,13 @@ def _dimensiona_etes(cen,plano):
         # `_dimensiona_etes` roda a cada avaliacao, entao isto acompanha o plano.
         e.quantidade=e.n_mod or None
         e.unidade="modulo" if e.n_mod else None
-        e.preco_unitario=e.capex_modulo if e.n_mod else None
+        # COM DOIS PRECOS NA MESMA ETE NAO EXISTE UNITARIO: `quantidade x unitario` nao
+        # fecharia o CAPEX, e um numero que nao fecha na tela e pior do que a falta dele.
+        # As parcelas ficam no `capex_comp`, onde a conta fecha. Com um preco so — que e o
+        # caso de todo o cadastro hoje — nada muda.
+        _misto=(getattr(e,"n_mod_exp",0)>0
+                and abs(modulo_de_expansao(e)[1]-e.capex_modulo)>1e-9)
+        e.preco_unitario=None if (not e.n_mod or _misto) else e.capex_modulo
     return dem
 
 # ---------- economia (MENSAL: prazos/lag/maturidade em MESES; desconto/agregacao ANUAL via ano=mes//12)
@@ -1498,6 +1542,12 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
         eo.unidade_capacidade=(str(d.get("unidade_capacidade")).strip()
                                if str(d.get("unidade_capacidade") or "").strip() else None)
         eo.capex_modulo=num(d.get("capex_por_modulo"),0.0)      # CAPEX por modulo
+        # O MODULO DE EXPANSAO DA ETE NOVA (29/09/2026): vazao e preco proprios, lidos aqui
+        # e interpretados em UM lugar so (`modulo_de_expansao`). None = coluna vazia = igual
+        # ao modulo inicial, e e assim que as 639 ETEs do cadastro continuam nos mesmos
+        # numeros no dia em que a migracao subir.
+        eo.cap_modulo_exp=num(d.get("capacidade_por_modulo_expansao"),None)
+        eo.capex_modulo_exp=num(d.get("capex_por_modulo_expansao"),None)
         _oc=d.get("capacidade_ociosa")                                    # CAPACIDADE OCIOSA = nominal - vazao de operacao
         _nom=d.get("capacidade_nominal_atual"); _opv=d.get("vazao_de_operacao_atual")
         if _oc is None and _nom is not None: _oc=num(_nom)-num(_opv)
@@ -1545,22 +1595,52 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                 # O CAPEX DO PACOTE NAO E `quantidade x preco`: ele inclui o TERRENO. Por
                 # isso o `capex_comp` sai com as duas parcelas em entradas separadas, e
                 # quem exibe soma a diferenca como o que ela e.
-                mo.quantidade=eo.modulos; mo.unidade="modulo"; mo.preco_unitario=eo.capex_modulo
+                mo.quantidade=eo.modulos; mo.unidade="modulo"
+                # PACOTE DE ZERO MODULOS NAO TEM UNITARIO (30/09/2026, revisao do Codex).
+                #
+                # Sao as 69 ETEs novas com `modulos` em branco no cadastro de 09/2026: o
+                # pacote e so o terreno, e um preco de modulo ali e preco de nada.
+                #
+                # E era o que quebrava a linha: na lista de obras o pacote e a expansao se
+                # fundem, e um pacote sem modulo publicando o preco do modulo INICIAL dava
+                # ao grupo DOIS precos distintos — o unitario da linha sumia e, com ele, a
+                # leitura do dinheiro. Medido: linha de CAPEX 1.080.000 mostrando 300.000.
+                mo.preco_unitario=eo.capex_modulo if eo.modulos else None
                 mo.capex_comp={f"ETE nova: {eo.modulos} modulo(s)":eo.modulos*eo.capex_modulo}
                 if eo.capex_terreno>1e-9: mo.capex_comp["ETE nova: terreno"]=eo.capex_terreno
+                # AS TRES PARCELAS DO CAPEX, em campo proprio (29/09/2026).
+                #
+                # Decisao do dono do produto: com modulos de dois precos na mesma ETE,
+                # `quantidade x unitario` deixa de fechar o CAPEX, e a obra passa a
+                # publicar as parcelas separadas — terreno, modulos iniciais, modulos de
+                # expansao. Em campo proprio, e nao no `capex_componentes`, porque quem
+                # exibe nao pode depender do TEXTO que o motor escreveu na chave do dicio-
+                # nario: o backend evita isso de proposito hoje, derivando o terreno como
+                # residual (`nivel_detalhe.py`), e o residual e justamente o que para de
+                # valer quando ha dois precos.
+                mo.parcela_terreno=eo.capex_terreno
+                mo.parcela_mod_ini=eo.modulos*eo.capex_modulo
+                mo.parcela_mod_exp=0.0
                 lst=[mo]; obras.append(mo)
                 # A EXPANSAO. `depende_do_pacote` existe porque sem ela o otimizador
                 # compraria um modulo barato ANTES do pacote caro para liberar vazao mais
                 # cedo — expandir uma estacao que ainda nao existe. O gating le essa marca.
+                # O modulo de expansao tem CAPACIDADE e PRECO proprios (29/09/2026), e e
+                # por isso que cada obra de expansao carrega o `cap_modulo` dela: a trava
+                # de capacidade em `viavel()` SOMA a capacidade de cada modulo construido,
+                # em vez de contar cabecas, e so assim modulos de tamanhos diferentes
+                # convivem no mesmo sistema. O OPEX por modulo e o mesmo dos iniciais.
+                _cap_x,_px=modulo_de_expansao(eo)
                 _exc=max(0.0,_sf.get(sisn,0.0)-cap_pacote)
-                K=int(math.ceil(_exc/eo.cap_modulo)) if (_exc>1e-9 and eo.cap_modulo>0) else (1 if _exc>1e-9 else 0)
+                K=int(math.ceil(_exc/_cap_x)) if (_exc>1e-9 and _cap_x>0) else (1 if _exc>1e-9 else 0)
                 for k in range(1,K+1):
-                    mx=Obra(f"{eo.id}#x{k}","ete_mod",sistema=sisn,capex_comp={f"ETE nova: expansao modulo {k}":eo.capex_modulo},
+                    mx=Obra(f"{eo.id}#x{k}","ete_mod",sistema=sisn,capex_comp={f"ETE nova: expansao modulo {k}":_px},
                             opex_ano=eo.opex_por_modulo,prazo_inicio=eo.prazo_inicio,prazo_exec=eo.prazo,
                             obrigatoria=0,proibida_ate=eo.proibida_ate,wacc=eo.wacc)   # expansao nunca e obrigatoria
-                    mx.cap_modulo=eo.cap_modulo; mx.folga=0.0; mx.modidx=k; mx.depende_do_pacote=True
+                    mx.cap_modulo=_cap_x; mx.folga=0.0; mx.modidx=k; mx.depende_do_pacote=True
                     mx.n_modulos=1
-                    mx.quantidade=1; mx.unidade="modulo"; mx.preco_unitario=eo.capex_modulo
+                    mx.quantidade=1; mx.unidade="modulo"; mx.preco_unitario=_px
+                    mx.parcela_terreno=0.0; mx.parcela_mod_ini=0.0; mx.parcela_mod_exp=_px
                     lst.append(mx); obras.append(mx)
             else:                                        # EXPANSAO: ramp de modulos conforme a vazao excede a folga
                 exc=max(0.0,_sf.get(sisn,0.0)-eo.folga)
@@ -1572,6 +1652,11 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                             proibida_ate=eo.proibida_ate,wacc=eo.wacc)
                     mo.cap_modulo=eo.cap_modulo; mo.folga=eo.folga; mo.modidx=k; mo.n_modulos=1
                     mo.quantidade=1; mo.unidade="modulo"; mo.preco_unitario=eo.capex_modulo
+                    # ETE EXISTENTE: o modulo que ela constroi custa `capex_por_modulo`, que
+                    # e a coluna do modulo INICIAL — a parcela e `ini` pelo PRECO pago, e nao
+                    # pela fase. Ver `modulo_de_expansao`.
+                    mo.parcela_terreno=0.0; mo.parcela_mod_ini=eo.capex_modulo
+                    mo.parcela_mod_exp=0.0
                     lst.append(mo); obras.append(mo)
             modulos_sis[sisn]=lst
     _set_forma_adocao(curva_adocao)
