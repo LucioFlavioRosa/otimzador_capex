@@ -97,6 +97,28 @@ def _normalizar_orcamento(v):
     return v
 
 
+def _onde_estourou(tb, quadros=3):
+    """As ultimas chamadas da pilha, como `arquivo.py:linha em funcao`.
+
+    POR QUE ISSO VAI PARA O BANCO. `run_status.erro` guardava so
+    `f"{type(e).__name__}: {e}"` — o QUE falhou, nunca o ONDE. O traceback completo existe,
+    mas so no log do driver do Databricks, que expira e que nem todo mundo alcanca. Quem
+    opera por VPN chega ao Postgres com um `psql`; se a localizacao nao estiver ali, o
+    primeiro passo de todo incidente e pedir a alguem que exporte um log.
+
+    TRES QUADROS, E OS ULTIMOS: o topo da pilha e sempre `rodar()`, que nao diz nada. O
+    fundo e onde a excecao nasceu.
+
+    Sai sem caminho absoluto de proposito — `arquivo.py` e o que localiza, e o resto e mapa
+    da maquina. `causa_segura` (no servico) tambem corta caminho ao servir, mas esta funcao
+    nao depende disso: o que nao e gravado nao vaza.
+    """
+    import os
+    pilha = traceback.extract_tb(tb)[-quadros:]
+    return " <- ".join(f"{os.path.basename(q.filename)}:{q.lineno} em {q.name}"
+                       for q in reversed(pilha))
+
+
 def _exigir_teto_anual(cen):
     """Falha cedo se o Cenario ficou SEM teto anual de CAPEX.
 
@@ -309,7 +331,13 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
 
     except Exception as e:                       # qualquer falha tecnica -> ERRO (nao vazio)
         try:
-            PUB.marcar_status_controle(pg_url, run_id, "ERRO", erro=f"{type(e).__name__}: {e}")
+            # A LOCALIZACAO VEM ANTES DA MENSAGEM, e nao depois: o servico corta a causa
+            # em 500 caracteres ao servir (`causa_segura`), e uma mensagem longa de SQL
+            # empurraria o `arquivo.py:linha` para fora do corte — justamente a parte que
+            # responde "onde no codigo?".
+            _onde = _onde_estourou(e.__traceback__)
+            PUB.marcar_status_controle(pg_url, run_id, "ERRO",
+                                       erro=f"{type(e).__name__} em {_onde}: {e}")
         except Exception:                        # banco fora do ar e a causa mais provavel
             print("ATENCAO: falhou tambem ao marcar ERRO:\n" + traceback.format_exc())
         print("ERRO na rodada:\n" + traceback.format_exc())
