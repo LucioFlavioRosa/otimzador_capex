@@ -292,11 +292,15 @@ def _dimensiona_etes(cen,plano):
                           if e.necessaria else {})
             if e.necessaria and _extra>0:
                 e.capex_comp[f"ETE nova: expansao {_extra} mod"]=_extra*_px
+            e.parcela_terreno=e.capex_terreno if e.necessaria else 0.0
+            e.parcela_mod_ini=(e.modulos*e.capex_modulo) if e.necessaria else 0.0
+            e.parcela_mod_exp=(_extra*_px) if e.necessaria else 0.0
         else:                                                   # EXPANSAO (calcula modulos pela vazao)
             exc=max(0.0,d-e.folga)
             n=int(math.ceil(exc/e.cap_modulo)) if (exc>1e-9 and e.cap_modulo>0) else (1 if exc>1e-9 else 0)
             e.n_mod=n; cap=n*e.capex_modulo
             e.n_mod_ini=n; e.n_mod_exp=0                        # todos ao preco de `capex_por_modulo`
+            e.parcela_terreno=0.0; e.parcela_mod_ini=cap; e.parcela_mod_exp=0.0
             e.capex=cap; e.necessaria=(n>0)
             e.capex_comp={f"ETE {n} mod":cap} if n>0 else {}
         e.responsavel="Aegea" if e.capex>1e-9 else "-"
@@ -1594,6 +1598,19 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                 mo.quantidade=eo.modulos; mo.unidade="modulo"; mo.preco_unitario=eo.capex_modulo
                 mo.capex_comp={f"ETE nova: {eo.modulos} modulo(s)":eo.modulos*eo.capex_modulo}
                 if eo.capex_terreno>1e-9: mo.capex_comp["ETE nova: terreno"]=eo.capex_terreno
+                # AS TRES PARCELAS DO CAPEX, em campo proprio (29/09/2026).
+                #
+                # Decisao do dono do produto: com modulos de dois precos na mesma ETE,
+                # `quantidade x unitario` deixa de fechar o CAPEX, e a obra passa a
+                # publicar as parcelas separadas — terreno, modulos iniciais, modulos de
+                # expansao. Em campo proprio, e nao no `capex_componentes`, porque quem
+                # exibe nao pode depender do TEXTO que o motor escreveu na chave do dicio-
+                # nario: o backend evita isso de proposito hoje, derivando o terreno como
+                # residual (`nivel_detalhe.py`), e o residual e justamente o que para de
+                # valer quando ha dois precos.
+                mo.parcela_terreno=eo.capex_terreno
+                mo.parcela_mod_ini=eo.modulos*eo.capex_modulo
+                mo.parcela_mod_exp=0.0
                 lst=[mo]; obras.append(mo)
                 # A EXPANSAO. `depende_do_pacote` existe porque sem ela o otimizador
                 # compraria um modulo barato ANTES do pacote caro para liberar vazao mais
@@ -1613,6 +1630,7 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                     mx.cap_modulo=_cap_x; mx.folga=0.0; mx.modidx=k; mx.depende_do_pacote=True
                     mx.n_modulos=1
                     mx.quantidade=1; mx.unidade="modulo"; mx.preco_unitario=_px
+                    mx.parcela_terreno=0.0; mx.parcela_mod_ini=0.0; mx.parcela_mod_exp=_px
                     lst.append(mx); obras.append(mx)
             else:                                        # EXPANSAO: ramp de modulos conforme a vazao excede a folga
                 exc=max(0.0,_sf.get(sisn,0.0)-eo.folga)
@@ -1624,6 +1642,11 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                             proibida_ate=eo.proibida_ate,wacc=eo.wacc)
                     mo.cap_modulo=eo.cap_modulo; mo.folga=eo.folga; mo.modidx=k; mo.n_modulos=1
                     mo.quantidade=1; mo.unidade="modulo"; mo.preco_unitario=eo.capex_modulo
+                    # ETE EXISTENTE: o modulo que ela constroi custa `capex_por_modulo`, que
+                    # e a coluna do modulo INICIAL — a parcela e `ini` pelo PRECO pago, e nao
+                    # pela fase. Ver `modulo_de_expansao`.
+                    mo.parcela_terreno=0.0; mo.parcela_mod_ini=eo.capex_modulo
+                    mo.parcela_mod_exp=0.0
                     lst.append(mo); obras.append(mo)
             modulos_sis[sisn]=lst
     _set_forma_adocao(curva_adocao)

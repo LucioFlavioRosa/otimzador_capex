@@ -88,6 +88,11 @@ CREATE TABLE IF NOT EXISTS public.otim_obra (
     quantidade DOUBLE PRECISION,
     unidade TEXT,
     preco_unitario DOUBLE PRECISION,
+    -- AS TRES PARCELAS DO CAPEX DA ETE. Nulas em toda obra que nao e ETE, onde
+    -- `quantidade x preco_unitario` fecha o CAPEX exato. Ver a migracao 02.
+    capex_terreno DOUBLE PRECISION,
+    capex_modulos_iniciais DOUBLE PRECISION,
+    capex_modulos_expansao DOUBLE PRECISION,
     opex_ano DOUBLE PRECISION,
     prazo_meses BIGINT,
     prazo_inicio_meses BIGINT,

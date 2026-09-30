@@ -243,6 +243,13 @@ CREATE TABLE IF NOT EXISTS input.ete_capex (
     nova                     text,
     capex_terreno            double precision,
     modulos                  integer,
+    -- O MODULO DE EXPANSAO DA ETE NOVA (29/09/2026). Os modulos iniciais tem vazao e preco
+    -- especificos e os de expansao tem outros; `modulos` continua sendo a quantidade
+    -- INICIAL. Vazias = iguais ao modulo inicial, e um ZERO declarado e respeitado como
+    -- zero. Ignoradas quando a ETE nao e nova, onde `capex_por_modulo` ja significa "o
+    -- modulo que eu construo". A migracao de banco existente e a 026 do servico.
+    capacidade_por_modulo_expansao double precision,
+    capex_por_modulo_expansao      double precision,
     wacc                     double precision
 );
 

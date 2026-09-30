@@ -452,3 +452,128 @@ def test_o_CPSAT_DIRETO_compra_a_QUANTIDADE_certa_de_expansao():
     assert len(feitas) == len(coletas), "deixou sub-bacia de fora em vez de comprar módulo"
     silent(M.viavel, cen, res["plano"])
     assert _ete(cen).n_mod == 1 + 3, f"n_mod={_ete(cen).n_mod}"
+
+
+# ------------------------------------------------ as três parcelas do CAPEX publicado
+#
+# Decisão do dono do produto em 29/09/2026: com módulos de dois preços na mesma ETE,
+# `quantidade × unitário` para de fechar o CAPEX. Em vez de publicar um unitário que não
+# fecha, a obra publica as parcelas — terreno, módulos iniciais, módulos de expansão.
+#
+# Em campo próprio, e não no `capex_componentes`: quem exibe não pode depender do TEXTO
+# que o motor escreveu na chave do dicionário. O backend já evitava isso de propósito,
+# derivando o terreno como residual (`capex − quantidade × preço`) — e o residual é
+# justamente o que para de valer quando há dois preços, porque passa a misturar o terreno
+# com a diferença entre eles.
+def _parcelas(o):
+    return (getattr(o, "parcela_terreno", None), getattr(o, "parcela_mod_ini", None),
+            getattr(o, "parcela_mod_exp", None))
+
+
+def test_o_PACOTE_separa_terreno_dos_modulos_iniciais():
+    cen = _cen_exp(modulos=3, ete_faseada=True)
+    ter, ini, exp = _parcelas(_obra(cen, "#nova"))
+    assert ter == pytest.approx(TERRENO)
+    assert ini == pytest.approx(3 * CAPEX_MOD)
+    assert exp == pytest.approx(0.0)
+
+
+def test_a_EXPANSAO_sai_na_parcela_dela_ao_preco_dela():
+    cen = _cen_exp(modulos=1, ete_faseada=True)
+    ter, ini, exp = _parcelas(_obra(cen, "#x1"))
+    assert (ter, ini) == (pytest.approx(0.0), pytest.approx(0.0))
+    assert exp == pytest.approx(CAPEX_EXP)
+
+
+def test_AS_TRES_PARCELAS_FECHAM_O_CAPEX_de_toda_obra_de_ete():
+    """A conta que a tela faz. Se ela não fechar, a linha da ETE volta a mentir."""
+    for kw in ({"modulos": 0}, {"modulos": 1}, {"modulos": 3}):
+        cen = _cen_exp(ete_faseada=True, **kw)
+        obras = [o for o in cen.obras.values() if o.tipo == "ete_mod"]
+        assert obras, kw
+        for o in obras:
+            ter, ini, exp = _parcelas(o)
+            assert None not in (ter, ini, exp), (o.id, kw)
+            assert ter + ini + exp == pytest.approx(o.capex), (o.id, kw)
+
+
+def test_na_ETE_EXISTENTE_todo_modulo_e_da_parcela_INICIAL():
+    """A separação é pelo PREÇO pago, e não pela fase: lá `capex_por_modulo` já significa
+    o módulo que a ETE constrói, e é essa a coluna que a parcela inicial representa."""
+    cen = _cen(_abas(modulos=0, nova="Nao", capex_terreno=0.0, capacidade_ociosa=0.0,
+                     capex_por_modulo_expansao=CAPEX_EXP), ete_faseada=True)
+    mods = [o for o in cen.obras.values() if o.tipo == "ete_mod"]
+    assert mods
+    for o in mods:
+        ter, ini, exp = _parcelas(o)
+        assert (ter, exp) == (pytest.approx(0.0), pytest.approx(0.0)), o.id
+        assert ini == pytest.approx(CAPEX_MOD), o.id
+
+
+def test_no_modo_modular_a_ETE_tambem_publica_as_tres():
+    M = engine()
+    cen = _cen_exp(modulos=1)
+    silent(M.viavel, cen, _plano(cen))
+    ter, ini, exp = _parcelas(_ete(cen))
+    assert ter == pytest.approx(TERRENO)
+    assert ini == pytest.approx(CAPEX_MOD)
+    assert exp == pytest.approx(CAPEX_EXP)
+    assert ter + ini + exp == pytest.approx(_ete(cen).capex)
+
+
+def test_a_obra_que_NAO_e_ETE_nao_tem_parcela_nenhuma():
+    """Nelas `quantidade × preço` fecha exato, e uma coluna de zeros na tela pediria uma
+    explicação que não existe."""
+    cen = _cen_exp(modulos=1, ete_faseada=True)
+    outras = [o for o in cen.obras.values() if o.tipo not in ("ete", "ete_mod")]
+    assert outras
+    for o in outras:
+        assert _parcelas(o) == (None, None, None), o.id
+
+
+def test_A_PUBLICACAO_leva_as_tres_colunas():
+    pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.infraestrutura import persistencia as P
+    M = engine()
+    D.set_engine(M); P.set_engine(M, D)
+    cen = _cen_exp(modulos=1, ete_faseada=True)
+    plano = _plano(cen)
+    plano[_obra(cen, "#x1").id] = _obra(cen, "#nova").prazo
+    tabs = silent(P.materializar, cen, silent(M.avaliar, cen, plano),
+                  run_id="run_parcelas", banco="pg")
+    ob = tabs["run_obra"].set_index("obra_id")
+    pac = ob.loc[_obra(cen, "#nova").id]
+    assert pac["capex_terreno"] == pytest.approx(TERRENO)
+    assert pac["capex_modulos_iniciais"] == pytest.approx(CAPEX_MOD)
+    assert pac["capex_modulos_expansao"] == pytest.approx(0.0)
+    mx = ob.loc[_obra(cen, "#x1").id]
+    assert mx["capex_modulos_expansao"] == pytest.approx(CAPEX_EXP)
+    # A soma das três, na rodada inteira, é o CAPEX das obras de ETE.
+    ete = ob[ob["componente"] == "ete_mod"]
+    assert (ete["capex_terreno"] + ete["capex_modulos_iniciais"]
+            + ete["capex_modulos_expansao"]).sum() == pytest.approx(ete["capex"].sum())
+    # E a obra que não é ETE sai com as três nulas.
+    outra = ob[ob["componente"] != "ete_mod"]
+    assert outra["capex_terreno"].isna().all()
+
+
+def test_a_migracao_do_resultado_cria_as_tres_colunas():
+    import pathlib
+    sql = pathlib.Path("otimizador/infraestrutura/sql/ddl_resultado_migracao_02.sql").read_text(
+        encoding="utf-8")
+    for col in ("capex_terreno", "capex_modulos_iniciais", "capex_modulos_expansao"):
+        assert f"ADD COLUMN IF NOT EXISTS {col}" in sql, col
+        assert f"COMMENT ON COLUMN public.otim_obra.{col}" in sql, col
+    ddl = pathlib.Path("otimizador/infraestrutura/sql/ddl_resultado.sql").read_text(
+        encoding="utf-8")
+    for col in ("capex_terreno", "capex_modulos_iniciais", "capex_modulos_expansao"):
+        assert col in ddl, f"banco novo nasceria sem {col}"
+
+
+def test_o_ddl_de_entrada_tem_as_colunas_do_modulo_de_expansao():
+    """Banco novo nasce com elas; banco existente recebe a migração 026 do serviço."""
+    import pathlib
+    ddl = pathlib.Path("otimizador/infraestrutura/sql/ddl_input.sql").read_text(encoding="utf-8")
+    assert "capacidade_por_modulo_expansao double precision" in ddl
+    assert "capex_por_modulo_expansao      double precision" in ddl

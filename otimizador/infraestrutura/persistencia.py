@@ -282,6 +282,16 @@ def materializar(cen, res, banco=None, params=None, run_id=None, incluir_snapsho
             "quantidade": getattr(o, "quantidade", None),
             "unidade": getattr(o, "unidade", None),
             "preco_unitario": getattr(o, "preco_unitario", None),
+            # AS TRES PARCELAS DO CAPEX DA ETE (29/09/2026): terreno, modulos iniciais e
+            # modulos de expansao. Decisao do dono do produto: com modulos de dois precos na
+            # mesma ETE, `quantidade x unitario` para de fechar o CAPEX, e a obra publica as
+            # parcelas em vez de um unitario que nao fecha.
+            #
+            # NULAS em toda obra que nao e ETE, e isso e informacao: nelas a conta fecha
+            # exata, e uma coluna de zeros na tela pediria uma explicacao que nao existe.
+            "capex_terreno": getattr(o, "parcela_terreno", None),
+            "capex_modulos_iniciais": getattr(o, "parcela_mod_ini", None),
+            "capex_modulos_expansao": getattr(o, "parcela_mod_exp", None),
             "opex_ano": o.opex_ano, "prazo_meses": o.prazo,
             "prazo_inicio_meses": o.prazo_inicio, "inicio_min_mes": o.inicio_min,
             "obrigatoria": bool(o.obrigatoria), "obrig_ano_plano": getattr(o, "_obrig_planyear", None),
