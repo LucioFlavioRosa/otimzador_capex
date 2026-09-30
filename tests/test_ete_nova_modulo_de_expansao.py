@@ -577,3 +577,77 @@ def test_o_ddl_de_entrada_tem_as_colunas_do_modulo_de_expansao():
     ddl = pathlib.Path("otimizador/infraestrutura/sql/ddl_input.sql").read_text(encoding="utf-8")
     assert "capacidade_por_modulo_expansao double precision" in ddl
     assert "capex_por_modulo_expansao      double precision" in ddl
+
+
+# ------------------------------------------ o pacote SEM módulos iniciais (revisão 2)
+#
+# Achado pela segunda revisão do Codex, e é o caso das 69 ETEs novas com `modulos` em
+# branco no cadastro de 09/2026 — a fronteira que mais importa.
+#
+# O pacote de ZERO módulos publicava `preco_unitario` = preço do módulo inicial: um preço
+# para módulo que ele não constrói. Na lista de obras o pacote e a expansão se fundem numa
+# linha, e o grupo passava a ter DOIS preços distintos — então o unitário da linha sumia, e
+# com ele a única leitura que o serviço tinha do dinheiro. Medido: linha de CAPEX
+# 1.080.000 mostrando 300.000, com 780.000 desaparecidos.
+def test_o_pacote_de_ZERO_modulos_nao_tem_unitario():
+    """Não há módulo nesse pacote — só o terreno. Um unitário ali é preço de nada.
+
+    E é o que devolve UM preço ao grupo: com o pacote sem preço, o único preço da linha é
+    o do módulo de expansão, e `quantidade × unitário + terreno` fecha o CAPEX de novo.
+    """
+    cen = _cen_exp(modulos=0, ete_faseada=True)
+    pac = _obra(cen, "#nova")
+    assert pac.quantidade == 0
+    assert pac.preco_unitario is None, "preço de módulo num pacote que não tem módulo"
+    assert pac.capex == pytest.approx(TERRENO), "o pacote de zero módulos é só o terreno"
+    # e a expansão continua com o preço dela
+    assert _obra(cen, "#x1").preco_unitario == pytest.approx(CAPEX_EXP)
+
+
+def test_o_pacote_de_ZERO_modulos_tambem_sem_as_colunas_novas():
+    """Vale igual quando o cadastro não declara módulo de expansão: o pacote não tem
+    módulo, logo não tem unitário. Aí o grupo continua com um preço só — o do módulo, que
+    é o mesmo nos dois tipos — e nada muda na tela."""
+    cen = _cen(_abas(modulos=0), ete_faseada=True)
+    assert _obra(cen, "#nova").preco_unitario is None
+    assert _obra(cen, "#x1").preco_unitario == pytest.approx(CAPEX_MOD)
+
+
+def test_o_pacote_COM_modulos_continua_com_unitario():
+    """O guarda: onde há módulo inicial, o unitário é o preço dele."""
+    for n in (1, 3):
+        pac = _obra(_cen_exp(modulos=n, ete_faseada=True), "#nova")
+        assert pac.quantidade == n
+        assert pac.preco_unitario == pytest.approx(CAPEX_MOD), n
+
+
+def test_A_LINHA_AGRUPADA_FECHA_A_CONTA_com_zero_modulos_iniciais():
+    """A conta que o serviço faz, reproduzida aqui sobre o que o motor publica.
+
+    O pacote e a expansão viram UMA linha na lista de obras (`cascata.CHAVE_DA_LINHA`).
+    Com um preço só, a leitura é `quantidade × unitário + terreno`; é ela que tinha de
+    voltar a fechar.
+    """
+    pytest.importorskip("matplotlib", reason="dashboard_otimizador_v2 exige matplotlib")
+    from otimizador.apresentacao import dashboard_otimizador_v2 as D
+    from otimizador.infraestrutura import persistencia as P
+    M = engine()
+    D.set_engine(M); P.set_engine(M, D)
+    cen = _cen_exp(modulos=0, ete_faseada=True)
+    plano = _plano(cen)
+    for o in cen.obras.values():
+        if getattr(o, "depende_do_pacote", False):
+            plano[o.id] = _obra(cen, "#nova").prazo
+    tabs = silent(P.materializar, cen, silent(M.avaliar, cen, plano),
+                  run_id="run_zero", banco="pg")
+    ob = tabs["run_obra"]
+    ete = ob[ob["componente"] == "ete_mod"]
+    precos = {p for p in ete["preco_unitario"] if p is not None and p == p}
+    assert len(precos) == 1, f"o grupo tem de ter UM preço: {precos}"
+    unit = precos.pop()
+    qtd = ete["quantidade"].sum()
+    terreno = ete["capex_terreno"].sum()
+    assert qtd * unit + terreno == pytest.approx(ete["capex"].sum())
+    # e as três parcelas fecham a mesma conta, pelo outro caminho
+    assert (terreno + ete["capex_modulos_iniciais"].sum()
+            + ete["capex_modulos_expansao"].sum()) == pytest.approx(ete["capex"].sum())

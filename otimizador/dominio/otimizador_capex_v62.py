@@ -1595,7 +1595,17 @@ def ler_banco(abas, orcamento=None, horizonte_capex=None, ete_fixo=False, ete_fa
                 # O CAPEX DO PACOTE NAO E `quantidade x preco`: ele inclui o TERRENO. Por
                 # isso o `capex_comp` sai com as duas parcelas em entradas separadas, e
                 # quem exibe soma a diferenca como o que ela e.
-                mo.quantidade=eo.modulos; mo.unidade="modulo"; mo.preco_unitario=eo.capex_modulo
+                mo.quantidade=eo.modulos; mo.unidade="modulo"
+                # PACOTE DE ZERO MODULOS NAO TEM UNITARIO (30/09/2026, revisao do Codex).
+                #
+                # Sao as 69 ETEs novas com `modulos` em branco no cadastro de 09/2026: o
+                # pacote e so o terreno, e um preco de modulo ali e preco de nada.
+                #
+                # E era o que quebrava a linha: na lista de obras o pacote e a expansao se
+                # fundem, e um pacote sem modulo publicando o preco do modulo INICIAL dava
+                # ao grupo DOIS precos distintos — o unitario da linha sumia e, com ele, a
+                # leitura do dinheiro. Medido: linha de CAPEX 1.080.000 mostrando 300.000.
+                mo.preco_unitario=eo.capex_modulo if eo.modulos else None
                 mo.capex_comp={f"ETE nova: {eo.modulos} modulo(s)":eo.modulos*eo.capex_modulo}
                 if eo.capex_terreno>1e-9: mo.capex_comp["ETE nova: terreno"]=eo.capex_terreno
                 # AS TRES PARCELAS DO CAPEX, em campo proprio (29/09/2026).
