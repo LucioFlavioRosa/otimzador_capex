@@ -97,6 +97,37 @@ def _normalizar_orcamento(v):
     return v
 
 
+def _raizes_do_motor():
+    """As pastas que contem o codigo DO MOTOR, para separa-lo de biblioteca na pilha.
+
+    REGRA POSITIVA, e nao negativa. A primeira versao perguntava "este arquivo NAO esta nos
+    caminhos que o `sysconfig` declara?" — e `sysconfig` inclui `purelib`/`platlib`, que sao
+    `site-packages`. No Databricks o motor e instalado como WHEEL, dentro de
+    `site-packages`: o filtro descartava os quadros do proprio motor justamente no ambiente
+    de producao, e a causa voltava a ser nome de biblioteca. Defeito confirmado na revisao de
+    30/09/2026.
+
+    Perguntar "esta sob a raiz do pacote?" vale nos tres arranjos em que este codigo roda:
+
+      repo          `otimizador/aplicacao/job_databricks.py` -> `.../otimizador`
+      wheel         `site-packages/otimizador/...`           -> `.../site-packages/otimizador`
+      pacote plano  `pacote-motor-main/job_databricks.py`    -> `.../pacote-motor-main`
+
+    Funcao propria para o teste do FALLBACK poder troca-la: sem esse encaixe nao ha como
+    montar uma pilha sem nenhum quadro nosso, e o teste que eu escrevi para isso passava sem
+    exercitar nada.
+    """
+    import os
+    import sys
+    raizes = {os.path.dirname(os.path.abspath(__file__))}
+    topo = (__package__ or "").split(".")[0]
+    mod = sys.modules.get(topo) if topo else None
+    arq = getattr(mod, "__file__", None)
+    if arq:
+        raizes.add(os.path.dirname(os.path.abspath(arq)))
+    return tuple(sorted(r.replace("\\", "/").lower() for r in raizes))
+
+
 def _onde_estourou(tb, quadros=3):
     """As ultimas chamadas da pilha, como `arquivo.py:linha em funcao`.
 
@@ -119,20 +150,14 @@ def _onde_estourou(tb, quadros=3):
     #: como primeiro quadro, e `publicacao.py:262 em publicar_postgres` atras. O primeiro
     #: nome nao ajuda quem vai abrir um arquivo do motor.
     #:
-    #: Entao os quadros de biblioteca saem, e o que sobra sao os nossos. Se NENHUM for
-    #: nosso — falha inteiramente dentro de dependencia —, valem os ultimos, porque um
-    #: nome de biblioteca ainda e melhor do que nada.
-    #: OS CAMINHOS QUE O PROPRIO PYTHON DECLARA, e nao um palpite de substring: a
-    #: biblioteca padrao mora em `Lib/` (nao em `site-packages`), e procurar por
-    #: "/lib/python" nao pega `Lib/json/decoder.py` no Windows.
-    import sysconfig
-    _libs = tuple(os.path.abspath(c).replace("\\", "/").lower() for c in
-                  {sysconfig.get_paths().get(k) for k in ("stdlib", "platstdlib",
-                                                          "purelib", "platlib")} if c)
+    #: Entao ficam os quadros do MOTOR. Se NENHUM for do motor — falha inteiramente dentro
+    #: de dependencia ou do chamador —, valem os ultimos, porque um nome de biblioteca ainda
+    #: e melhor do que nada.
+    raizes = _raizes_do_motor()
 
     def _nosso(q):
         c = os.path.abspath(q.filename).replace("\\", "/").lower()
-        return not c.startswith(_libs)
+        return c.startswith(raizes)
     pilha = traceback.extract_tb(tb)
     escolhidos = [q for q in pilha if _nosso(q)] or list(pilha)
     return " <- ".join(f"{os.path.basename(q.filename)}:{q.lineno} em {q.name}"

@@ -102,39 +102,59 @@ def test_o_job_grava_a_causa_COM_a_localizacao(monkeypatch):
     assert "job_databricks.py:" in causa, causa
     assert "run_request nao encontrada" in causa, causa
 
+
 def test_QUADRO_DE_BIBLIOTECA_nao_rouba_a_frente():
-    """Achado pela revisão 6 do Codex: num `INSERT` que falha, a pilha termina dentro do
-    driver, e a causa começava com `extras.py:1299 em execute_values` — nome que não ajuda
-    quem vai abrir um arquivo do motor.
+    """O cenário de produção, e o defeito que a revisão 7 achou.
 
-    O erro é levantado de dentro de uma função de biblioteca de verdade (`json.loads`), com
-    código nosso atrás: o que tem de aparecer primeiro é o NOSSO.
+    Num `INSERT` que falha, a pilha termina dentro do driver, e a causa começava com
+    `extras.py:1299 em execute_values` — nome que não ajuda quem vai abrir um arquivo do
+    motor.
+
+    O erro aqui nasce DENTRO do motor (`_exigir_colunas_do_resultado`, que abre conexão) e
+    termina fundo na biblioteca de banco: é a forma exata da falha real. O que tem de
+    aparecer primeiro é o arquivo do MOTOR.
     """
-    import json
-
-    def nosso_codigo():
-        json.loads("{isso nao e json}")
-
     try:
-        nosso_codigo()
+        J._exigir_colunas_do_resultado("postgresql://ninguem:nada@127.0.0.1:1/naoexiste")
     except Exception as e:
         onde = J._onde_estourou(e.__traceback__)
-    assert onde.startswith("test_erro_diz_onde.py:"), onde
-    assert "decoder.py" not in onde and "json" not in onde.split(" <- ")[0], onde
+    else:
+        pytest.fail("a conexão deveria falhar")
+    assert onde.startswith("job_databricks.py:"), onde
 
 
-def test_se_NADA_for_nosso_ainda_diz_algo():
-    """Falha inteiramente dentro de dependência: nome de biblioteca ainda é melhor que
-    nada. O fallback não pode devolver string vazia."""
-    import json
-    quadros = []
-    try:
-        json.loads("{")
-    except Exception as e:
-        import traceback as _tb
-        # descarta o quadro deste arquivo, sobrando só os da biblioteca
-        pilha = _tb.extract_tb(e.__traceback__)[1:]
-        assert pilha, "a fixture precisa de quadro de biblioteca"
-        quadros = pilha
-    # com a pilha só de biblioteca, o filtro devolve os últimos em vez de nada
-    assert quadros
+def test_a_raiz_do_motor_vale_TAMBEM_instalado_como_wheel():
+    """A regra é POSITIVA — "está sob a raiz do pacote?" — e não negativa.
+
+    A primeira versão perguntava "não está nos caminhos do `sysconfig`?", e `sysconfig`
+    inclui `purelib`/`platlib`, que são `site-packages`. No Databricks o motor é instalado
+    como wheel, dentro de `site-packages`: o filtro descartava os quadros do próprio motor
+    justamente no ambiente de produção.
+
+    O teste não instala wheel; ele prende a propriedade que faz a regra sobreviver a isso —
+    a raiz sai do próprio módulo, então acompanha o pacote para onde ele for.
+    """
+    import os
+    raizes = J._raizes_do_motor()
+    assert raizes, "sem raiz, todo quadro seria descartado"
+    meu = os.path.dirname(os.path.abspath(J.__file__)).replace("\\", "/").lower()
+    assert any(meu.startswith(r) for r in raizes), (meu, raizes)
+    # e a raiz NÃO é um caminho de biblioteca genérico, que pegaria tudo
+    assert not any(r.endswith("/site-packages") for r in raizes), raizes
+
+
+def test_se_NADA_for_do_motor_ainda_diz_algo(monkeypatch):
+    """O fallback: falha inteiramente dentro de dependência ou do chamador.
+
+    Nome de biblioteca ainda é melhor do que string vazia — e sem isto a causa gravada no
+    banco perderia a única pista que tinha.
+
+    A revisão 7 apontou que o meu teste anterior disto era VAZIO: ele montava a pilha e
+    nunca chamava `_onde_estourou`. Agora a raiz do motor é trocada por uma pasta que não
+    existe, e aí nenhum quadro é nosso — que é o estado que o fallback atende.
+    """
+    monkeypatch.setattr(J, "_raizes_do_motor", lambda: ("/pasta/que/nao/existe",))
+    e = _estourar()
+    onde = J._onde_estourou(e.__traceback__)
+    assert onde, "o fallback não pode devolver vazio"
+    assert "test_erro_diz_onde.py:" in onde, onde
