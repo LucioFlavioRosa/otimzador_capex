@@ -588,6 +588,31 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
         cols[_g]=[(vpl,(list(prof)+[0.0]*anos)[:anos],pl,vr,mn*_w,cv*_w) for (vpl,prof,pl,vr,mn,cv) in cols[_g]]
     if verbose: print(f"colunas: {sum(len(v) for v in cols.values())} ({len(grupos)} cidades) em {_t.time()-t0:.0f}s")
 
+    # ---- CIDADE SEM NENHUMA COLUNA QUE CONSTRUA ALGO ----
+    #
+    # O mestre escolhe EXATAMENTE UMA coluna por cidade (`AddExactlyOne`). Se a unica que
+    # sobrou for a "nada", a cidade nao entra em plano nenhum — e isso aparece na tela como
+    # decisao economica normal, indistinguivel de "nao valeu a pena".
+    #
+    # E e o modo de falha mais caro que este solver tem, porque `_colunas_faseada` descarta
+    # em SILENCIO toda coluna que `viavel()` recusa. Foi assim que tres cidades da uB2
+    # (Cabo Frio, Nilopolis e Pinheiral) ficaram fora de qualquer plano — 205 sub-bacias e
+    # 65.930 ligacoes novas — por um defeito no agendamento da expansao da ETE, sem uma
+    # linha de log em nenhum lugar.
+    #
+    # O aviso nao julga a decisao: cidade sem obra AEGEA disponivel nao entra na lista, e
+    # cidade com opcao que o mestre nao escolheu tambem nao. A lista e so de quem nao TINHA
+    # opcao. Em rede fechada, o que nao se ve nao se conserta.
+    _tem_obra_aegea={g:False for g in grupos}
+    for _oid,_o in cen.obras.items():
+        if _o.eh_aegea(): _tem_obra_aegea[cen.cidade_da(_o)]=True
+    sem_coluna=sorted(g for g in grupos if _tem_obra_aegea.get(g)
+                      and not any(any(v is not None for v in c[2].values()) for c in cols[g]))
+    if sem_coluna and verbose:
+        print(f"  [aviso] {len(sem_coluna)} cidade(s) sem NENHUMA coluna candidata que "
+              f"construa algo — elas nao podem entrar no plano: {sem_coluna[:8]}"
+              + (" ..." if len(sem_coluna) > 8 else ""))
+
     # ---- obras OBRIGATORIAS por CIDADE (inclui ETEs, via cidade_da) ----
     obrig_por_cidade={}
     for oid,o in cen.obras.items():
@@ -880,6 +905,16 @@ def resolver_por_sistema(cen, max_time_s=60, workers=8, verbose=True, col_time_s
         if verbose: print("  [aviso] "+aviso)
     res["aviso_obrigatoria"]=aviso
     res["obrig_desconsideradas_fora_janela"]=getattr(cen,"_obrig_desconsideradas",[])
+    # Viaja no resultado para o portao de qualidade transformar em linha de diagnostico —
+    # e assim a pergunta "por que esta cidade nao tem obra?" tem resposta por SQL, sem
+    # depender de alguem ter guardado o log do driver do Databricks.
+    res["cidades_sem_coluna_viavel"]=sem_coluna
+    if sem_coluna:
+        res["aviso_colunas"]=(
+            f"{len(sem_coluna)} cidade(s) sem nenhuma coluna candidata que construa algo: "
+            f"{sem_coluna[:8]}" + (" ..." if len(sem_coluna) > 8 else "")
+            + ". O mestre escolhe uma coluna por cidade, entao elas nao podiam entrar no "
+              "plano — o resultado delas nao e decisao economica.")
     if not res.get("auditoria_orcamento",{}).get("ok",True):
         res["aviso_orcamento"]=("PLANO AINDA ESTOURA O TETO apos o reparo - confira se engine, solver e banco "
                                 "estao na mesma versao e se a celula de carga nao foi reexecutada depois do solve.")

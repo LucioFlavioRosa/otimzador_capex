@@ -118,6 +118,54 @@ def _exigir_teto_anual(cen):
             f"ORCAMENTO_TOTAL sozinho nao define o teto por ano.")
 
 
+#: As colunas que a PUBLICACAO grava e que vieram de migracao do schema de resultado.
+#: Cada linha e (coluna, arquivo da migracao) — o arquivo e o que o operador precisa ler.
+_COLUNAS_DE_MIGRACAO_DO_RESULTADO = [
+    ("capex_terreno", "ddl_resultado_migracao_02.sql"),
+    ("capex_modulos_iniciais", "ddl_resultado_migracao_02.sql"),
+    ("capex_modulos_expansao", "ddl_resultado_migracao_02.sql"),
+]
+
+
+def _exigir_colunas_do_resultado(pg_url, schema="public"):
+    """Falha ANTES do solver se `otim_obra` nao tem as colunas que a publicacao grava.
+
+    Sem isto, a falta de uma migracao do schema de resultado aparece no FIM: a rodada
+    carrega o cadastro, resolve, materializa, passa pelo portao de qualidade, pode escrever
+    o blob — e quebra no `INSERT` com `UndefinedColumn: column "capex_terreno" of relation
+    "otim_obra" does not exist`. O custo e uma execucao inteira do Databricks, e a mensagem
+    que o operador ve nao diz qual migracao aplicar.
+
+    Medido em 30/09/2026, na revisao de producao: a publicacao e atomica (nao sobra
+    `otim_meta` nem `otim_obra`), mas o blob pode ja ter sido escrito, porque a ordem do job
+    e blob -> Postgres -> notificacao.
+
+    Tabela AUSENTE nao e erro: `publicar_postgres(criar=True)` cria o schema do zero, e ai
+    ela nasce com as colunas. O que se checa e a tabela que EXISTE e esta velha.
+    """
+    from sqlalchemy import create_engine, text
+    eng = create_engine(pg_url)
+    try:
+        with eng.connect() as con:
+            existe = con.execute(text(
+                "SELECT 1 FROM information_schema.tables"
+                " WHERE table_schema = :s AND table_name = 'otim_obra'"),
+                {"s": schema}).fetchone()
+            if not existe:
+                return                      # schema novo: a criacao ja traz as colunas
+            tem = {r[0] for r in con.execute(text(
+                "SELECT column_name FROM information_schema.columns"
+                " WHERE table_schema = :s AND table_name = 'otim_obra'"), {"s": schema})}
+    finally:
+        eng.dispose()
+    faltam = sorted({f"{arq} (falta {schema}.otim_obra.{col})"
+                     for col, arq in _COLUNAS_DE_MIGRACAO_DO_RESULTADO if col not in tem})
+    if faltam:
+        raise RuntimeError(
+            "o schema de resultado esta desatualizado e a publicacao falharia no fim da "
+            f"rodada. Aplique: {'; '.join(faltam)}")
+
+
 def _params_para_ler_banco(p):
     """Traduz o payload da run_request para os kwargs do ler_banco/carregar_postgres.
 
@@ -210,6 +258,10 @@ def rodar(run_id, pg_url, blob=None, schema_input="input", schema_ctrl="controle
         # 3b) teto de CAPEX tem de existir — depois da carga, para o fallback pela tabela
         #     `input.orcamento` valer. Sem isso o CP-SAT estoura convertendo INF em int.
         _exigir_teto_anual(cen)
+
+        # 3c) e o schema de RESULTADO tem de aceitar o que a publicacao grava. Aqui, e nao
+        #     no fim: sem esta checagem a falta de uma migracao custa a rodada inteira.
+        _exigir_colunas_do_resultado(pg_url, schema=schema_pub)
 
         # 4) otimizacao
         res = CP.resolver_por_sistema(cen,

@@ -446,6 +446,11 @@ def job_dublado(monkeypatch):
     monkeypatch.setattr(J, "_ler_run_request",
                         lambda pg, rid, schema="controle": {"ORCAMENTO": 50e6,
                                                             "USUARIO": "teste"})
+    # O PREFLIGHT DO SCHEMA DE RESULTADO abre conexao de verdade, e aqui nao ha banco.
+    # Ele tem teste proprio (`test_preflight_do_resultado.py`), com banco: o papel desta
+    # fixture e rodar `rodar()` sem Postgres, e nao dublar o que ela ja cobre.
+    monkeypatch.setattr(J, "_exigir_colunas_do_resultado",
+                        lambda pg, schema="public": None)
 
     vistos = {}
 
